@@ -100,6 +100,8 @@ A complete, production-grade SaaS email marketing platform inspired by Mailchimp
 
 ## Setup
 
+### Local Development
+
 1. Install dependencies:
 ```bash
 npm install
@@ -120,6 +122,51 @@ npm run dev
 ```bash
 npm run build
 ```
+
+### Database Migration
+
+The database schema is automatically managed through Supabase. The migration file is located at:
+```
+supabase/migrations/20251115220808_initial_schema.sql
+```
+
+All tables include:
+- Row Level Security (RLS) enabled
+- Proper indexes for performance
+- Automated timestamp triggers
+- Secure access policies
+
+### Netlify Deployment
+
+The project is pre-configured for Netlify deployment:
+
+1. **Connect Repository**: Link your GitHub/GitLab repository to Netlify
+
+2. **Build Settings** (automatically configured via `netlify.toml`):
+   - Build command: `npm run build`
+   - Publish directory: `dist`
+   - Node version: 18
+
+3. **Environment Variables**: Add these in Netlify dashboard under Site Settings > Environment Variables:
+   ```
+   VITE_SUPABASE_URL=your_supabase_project_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+4. **Deploy**: Push to your main branch or manually trigger a deploy
+
+The `netlify.toml` and `public/_redirects` files handle SPA routing automatically.
+
+### Supabase Edge Functions
+
+The platform includes 4 Edge Functions that are already deployed:
+
+1. **send-email**: Handles email sending via SendGrid
+2. **sendgrid-webhook**: Processes SendGrid delivery events
+3. **stripe-checkout**: Creates Stripe checkout sessions
+4. **stripe-webhook**: Handles Stripe subscription webhooks
+
+Environment variables for Edge Functions are automatically configured in Supabase.
 
 ## Edge Functions
 
