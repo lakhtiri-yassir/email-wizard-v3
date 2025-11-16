@@ -15,6 +15,7 @@ A **production-ready email marketing SaaS platform** with:
 ✅ Campaign creation and management
 ✅ Email sending via SendGrid API
 ✅ Real-time event tracking (opens, clicks, bounces)
+✅ Webhook signature verification (HMAC-SHA256)
 ✅ Contact management with CSV import/export
 ✅ Live analytics dashboard
 ✅ Usage quota enforcement
@@ -333,7 +334,7 @@ const { data: contacts } = await supabase.from('contacts').select('*').eq('statu
 
 ### sendgrid-webhook (supabase/functions/sendgrid-webhook/index.ts)
 
-**Purpose:** Process SendGrid event webhooks
+**Purpose:** Process SendGrid event webhooks with signature verification
 
 **Input:** Array of SendGrid events
 ```typescript
@@ -347,13 +348,20 @@ const { data: contacts } = await supabase.from('contacts').select('*').eq('statu
 }]
 ```
 
+**Security:**
+- HMAC-SHA256 signature verification
+- Validates webhook authenticity
+- Requires SENDGRID_WEBHOOK_VERIFICATION_KEY
+- Returns 401 for invalid signatures
+
 **Process:**
-1. Parse events
-2. Insert into email_events table
-3. Update campaign statistics
-4. Adjust contact engagement scores
-5. Update contact status (bounced/unsubscribed)
-6. Log link clicks
+1. Verify webhook signature
+2. Parse events
+3. Insert into email_events table
+4. Update campaign statistics
+5. Adjust contact engagement scores
+6. Update contact status (bounced/unsubscribed)
+7. Log link clicks
 
 **Output:** HTTP 200 OK
 
@@ -433,11 +441,13 @@ if (recipients.length > remainingQuota) {
 1. ✅ Code is complete
 2. ✅ Database is ready
 3. ✅ Edge Functions deployed
-4. ⏳ Add SENDGRID_API_KEY to Supabase
-5. ⏳ Configure SendGrid webhook URL
-6. ⏳ Test with your email
-7. ⏳ Add production domain
-8. ⏳ Configure Stripe (optional)
+4. ✅ Webhook signature verification enabled
+5. ⏳ Add SENDGRID_API_KEY to Supabase
+6. ⏳ Add SENDGRID_WEBHOOK_VERIFICATION_KEY to Supabase
+7. ⏳ Configure SendGrid webhook URL
+8. ⏳ Test with your email
+9. ⏳ Add production domain
+10. ⏳ Configure Stripe (optional)
 
 ### Testing Checklist
 - [ ] Send test campaign to yourself
@@ -469,6 +479,7 @@ if (recipients.length > remainingQuota) {
 ✅ Campaign creation
 ✅ Email sending (via SendGrid)
 ✅ Real-time event tracking
+✅ Webhook signature verification
 ✅ Analytics dashboard
 ✅ Contact management
 ✅ CSV import/export

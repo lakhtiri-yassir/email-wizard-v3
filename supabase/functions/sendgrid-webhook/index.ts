@@ -7,6 +7,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
+async function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  timestamp: string,
+  verificationKey: string
+): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(timestamp + payload);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(verificationKey),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const signatureBuffer = await crypto.subtle.sign('HMAC', key, data);
+    const expectedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
+    return signature === expectedSignature;
+  } catch (error) {
+    console.error('Signature verification error:', error);
+    return false;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -18,9 +43,41 @@ Deno.serve(async (req: Request) => {
   try {
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
     const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const SENDGRID_VERIFICATION_KEY = Deno.env.get('SENDGRID_WEBHOOK_VERIFICATION_KEY');
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const events = await req.json();
+    const signature = req.headers.get('x-twilio-email-event-webhook-signature');
+    const timestamp = req.headers.get('x-twilio-email-event-webhook-timestamp');
+    const payload = await req.text();
+
+    if (SENDGRID_VERIFICATION_KEY && signature && timestamp) {
+      const isValid = await verifyWebhookSignature(
+        payload,
+        signature,
+        timestamp,
+        SENDGRID_VERIFICATION_KEY
+      );
+
+      if (!isValid) {
+        console.error('Invalid webhook signature');
+        return new Response(
+          JSON.stringify({ error: 'Invalid signature' }),
+          {
+            status: 401,
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      }
+
+      console.log('Webhook signature verified');
+    } else if (SENDGRID_VERIFICATION_KEY) {
+      console.warn('Webhook signature verification enabled but headers missing');
+    }
+
+    const events = JSON.parse(payload);
 
     console.log(`Processing ${events.length} SendGrid events`);
 

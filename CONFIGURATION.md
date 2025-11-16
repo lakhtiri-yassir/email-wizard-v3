@@ -42,7 +42,10 @@ https://epixqnnaksxmjarwnhbx.supabase.co/functions/v1/sendgrid-webhook
 3. Toggle webhook ON
 4. Paste webhook URL
 5. Select all events listed above
-6. Click Save
+6. Enable "Signature Verification" (recommended for security)
+7. Copy the verification key
+8. Add to Supabase secrets as `SENDGRID_WEBHOOK_VERIFICATION_KEY`
+9. Click Save
 
 ---
 
@@ -100,8 +103,8 @@ const priceIds = {
    - customer.subscription.deleted
    - invoice.payment_succeeded
    - invoice.payment_failed
-4. Copy webhook secret
-5. Add to Supabase secrets
+4. Copy webhook signing secret
+5. Add to Supabase secrets as `STRIPE_WEBHOOK_SECRET`
 
 ---
 
@@ -117,6 +120,9 @@ VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```bash
 # Required for email sending
 SENDGRID_API_KEY=SG.xxxxxxxxxxxxx
+
+# Required for webhook signature verification (get from SendGrid webhook settings)
+SENDGRID_WEBHOOK_VERIFICATION_KEY=your_verification_key_here
 
 # Auto-configured by Supabase
 SUPABASE_URL=https://epixqnnaksxmjarwnhbx.supabase.co
@@ -140,10 +146,11 @@ STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxx
 
 ### Backend
 - [x] send-email Edge Function deployed
-- [x] sendgrid-webhook Edge Function deployed
+- [x] sendgrid-webhook Edge Function deployed (with signature verification)
 - [x] stripe-checkout Edge Function deployed
 - [x] stripe-webhook Edge Function deployed
 - [ ] SENDGRID_API_KEY configured
+- [ ] SENDGRID_WEBHOOK_VERIFICATION_KEY configured
 - [ ] SendGrid webhook URL configured
 
 ### Frontend
@@ -235,6 +242,12 @@ curl -X POST http://localhost:54321/functions/v1/send-email \
 - Users can only access their own data
 - Service role key only used in Edge Functions
 - Never expose service role key to frontend
+
+### Webhooks
+- SendGrid webhook signature verification enabled
+- Protects against unauthorized webhook requests
+- Uses HMAC-SHA256 for signature validation
+- Verification key stored securely in environment variables
 
 ### Email
 - Validate all email addresses before sending
