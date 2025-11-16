@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
@@ -14,46 +14,8 @@ import { Analytics } from './pages/app/Analytics';
 import { Settings } from './pages/app/Settings';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 
-function Router() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
-
-  useEffect(() => {
-    const handleLocationChange = () => {
-      setCurrentPath(window.location.pathname);
-    };
-
-    window.addEventListener('popstate', handleLocationChange);
-
-    const originalPushState = window.history.pushState;
-    window.history.pushState = function (...args) {
-      originalPushState.apply(window.history, args);
-      handleLocationChange();
-    };
-
-    return () => {
-      window.removeEventListener('popstate', handleLocationChange);
-      window.history.pushState = originalPushState;
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleLinkClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const link = target.closest('a');
-
-      if (link && link.href && link.href.startsWith(window.location.origin)) {
-        e.preventDefault();
-        const path = link.href.replace(window.location.origin, '');
-        window.history.pushState({}, '', path);
-        setCurrentPath(path);
-        window.scrollTo(0, 0);
-      }
-    };
-
-    document.addEventListener('click', handleLinkClick);
-    return () => document.removeEventListener('click', handleLinkClick);
-  }, []);
 
   if (loading) {
     return (
@@ -67,47 +29,36 @@ function Router() {
   }
 
   if (!user) {
-    if (currentPath === '/signup') return <SignupPage />;
-    if (currentPath === '/login') return <LoginPage />;
-    return <LandingPage />;
+    return <Navigate to="/login" replace />;
   }
 
-  if (currentPath === '/' || currentPath === '/login' || currentPath === '/signup') {
-    window.history.pushState({}, '', '/app');
-    return <Dashboard />;
-  }
-
-  switch (currentPath) {
-    case '/app':
-      return <Dashboard />;
-    case '/app/audience':
-      return <Audience />;
-    case '/app/campaigns':
-      return <Campaigns />;
-    case '/app/automations':
-      return <Automations />;
-    case '/app/templates':
-      return <Templates />;
-    case '/app/content':
-      return <ContentStudio />;
-    case '/app/landing-pages':
-      return <LandingPages />;
-    case '/app/analytics':
-      return <Analytics />;
-    case '/app/settings':
-      return <Settings />;
-    case '/admin':
-      return <AdminDashboard />;
-    default:
-      return <Dashboard />;
-  }
+  return <>{children}</>;
 }
 
 function App() {
   return (
-    <AuthProvider>
-      <Router />
-    </AuthProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+
+          <Route path="/app" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/app/audience" element={<ProtectedRoute><Audience /></ProtectedRoute>} />
+          <Route path="/app/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
+          <Route path="/app/automations" element={<ProtectedRoute><Automations /></ProtectedRoute>} />
+          <Route path="/app/templates" element={<ProtectedRoute><Templates /></ProtectedRoute>} />
+          <Route path="/app/content" element={<ProtectedRoute><ContentStudio /></ProtectedRoute>} />
+          <Route path="/app/landing-pages" element={<ProtectedRoute><LandingPages /></ProtectedRoute>} />
+          <Route path="/app/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+          <Route path="/app/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

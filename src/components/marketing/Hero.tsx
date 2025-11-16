@@ -1,7 +1,10 @@
 import { ArrowRight, CheckCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
 
 export const Hero = () => {
+  const navigate = useNavigate();
+
   return (
     <section className="relative overflow-hidden bg-white py-20 sm:py-32">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -13,10 +16,10 @@ export const Hero = () => {
             Marketing and automations platform designed to grow your business. Send better email campaigns, build customer relationships, and sell more stuff.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12 animate-slide-up">
-            <Button variant="primary" size="lg" icon={ArrowRight} iconPosition="end">
+            <Button variant="primary" size="lg" icon={ArrowRight} iconPosition="end" onClick={() => navigate('/signup')}>
               Start Free Trial
             </Button>
-            <Button variant="secondary" size="lg">
+            <Button variant="secondary" size="lg" onClick={() => navigate('/signup')}>
               Watch Demo
             </Button>
           </div>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, Lock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,7 @@ export const LoginPage = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,6 +19,7 @@ export const LoginPage = () => {
 
     try {
       await signIn(email, password);
+      navigate('/app');
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     } finally {
@@ -29,10 +31,24 @@ export const LoginPage = () => {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-6">
-            <Mail className="w-10 h-10 text-gold" />
-            <span className="text-3xl font-serif font-bold">Email Wizard</span>
-          </div>
+          <button onClick={() => navigate('/')} className="inline-block mb-6">
+            <img
+              src="/logo.jpg"
+              alt="Email Wizard"
+              className="h-12 w-auto object-contain mx-auto"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const fallback = e.currentTarget.nextElementSibling;
+                if (fallback) (fallback as HTMLElement).style.display = 'flex';
+              }}
+            />
+            <div className="hidden items-center justify-center gap-2">
+              <div className="w-10 h-10 bg-purple rounded-full flex items-center justify-center border-2 border-black">
+                <span className="text-white font-bold text-xl">EW</span>
+              </div>
+              <span className="text-3xl font-serif font-bold">Email Wizard</span>
+            </div>
+          </button>
           <h1 className="text-3xl font-serif font-bold mb-2">Welcome back</h1>
           <p className="text-gray-600">Sign in to your account to continue</p>
         </div>
