@@ -1,51 +1,105 @@
+import { useState, useEffect } from 'react';
 import { TrendingUp, Mail, Users, MousePointer, MailOpen } from 'lucide-react';
 import { AppLayout } from '../../components/app/AppLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
-
-const stats = [
-  {
-    name: 'Total Sent',
-    value: '12,543',
-    change: '+12.5%',
-    trend: 'up',
-    icon: Mail,
-    color: 'text-gold',
-  },
-  {
-    name: 'Open Rate',
-    value: '42.3%',
-    change: '+2.1%',
-    trend: 'up',
-    icon: MailOpen,
-    color: 'text-purple',
-  },
-  {
-    name: 'Click Rate',
-    value: '18.7%',
-    change: '+4.2%',
-    trend: 'up',
-    icon: MousePointer,
-    color: 'text-gold',
-  },
-  {
-    name: 'Active Contacts',
-    value: '2,847',
-    change: '+156',
-    trend: 'up',
-    icon: Users,
-    color: 'text-purple',
-  },
-];
-
-const recentCampaigns = [
-  { name: 'Summer Sale Newsletter', sent: '2,543', opens: '1,076', clicks: '478', date: '2 hours ago' },
-  { name: 'Product Update', sent: '1,234', opens: '523', clicks: '189', date: '1 day ago' },
-  { name: 'Welcome Series #1', sent: '456', opens: '234', clicks: '98', date: '2 days ago' },
-];
+import { supabase } from '../../lib/supabase';
 
 export const Dashboard = () => {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
+  const [stats, setStats] = useState({
+    totalSent: '0',
+    openRate: '0%',
+    clickRate: '0%',
+    activeContacts: '0'
+  });
+  const [recentCampaigns, setRecentCampaigns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      fetchDashboardData();
+    }
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    try {
+      const { data: campaigns } = await supabase
+        .from('campaigns')
+        .select('*')
+        .eq('status', 'sent')
+        .order('sent_at', { ascending: false });
+
+      const totalSent = campaigns?.reduce((sum, c) => sum + (c.recipients_count || 0), 0) || 0;
+      const totalOpens = campaigns?.reduce((sum, c) => sum + (c.opens || 0), 0) || 0;
+      const totalClicks = campaigns?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0;
+
+      const openRate = totalSent > 0 ? ((totalOpens / totalSent) * 100).toFixed(1) : '0.0';
+      const clickRate = totalSent > 0 ? ((totalClicks / totalSent) * 100).toFixed(1) : '0.0';
+
+      const { data: contacts } = await supabase
+        .from('contacts')
+        .select('id', { count: 'exact' })
+        .eq('status', 'active');
+
+      setStats({
+        totalSent: totalSent.toLocaleString(),
+        openRate: `${openRate}%`,
+        clickRate: `${clickRate}%`,
+        activeContacts: (contacts?.length || 0).toLocaleString()
+      });
+
+      setRecentCampaigns(
+        campaigns?.slice(0, 5).map(c => ({
+          name: c.name,
+          sent: (c.recipients_count || 0).toLocaleString(),
+          opens: (c.opens || 0).toLocaleString(),
+          clicks: (c.clicks || 0).toLocaleString(),
+          date: new Date(c.sent_at).toLocaleDateString()
+        })) || []
+      );
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statsDisplay = [
+    {
+      name: 'Total Sent',
+      value: stats.totalSent,
+      change: '+12.5%',
+      trend: 'up',
+      icon: Mail,
+      color: 'text-gold',
+    },
+    {
+      name: 'Open Rate',
+      value: stats.openRate,
+      change: '+2.1%',
+      trend: 'up',
+      icon: MailOpen,
+      color: 'text-purple',
+    },
+    {
+      name: 'Click Rate',
+      value: stats.clickRate,
+      change: '+4.2%',
+      trend: 'up',
+      icon: MousePointer,
+      color: 'text-gold',
+    },
+    {
+      name: 'Active Contacts',
+      value: stats.activeContacts,
+      change: '+156',
+      trend: 'up',
+      icon: Users,
+      color: 'text-purple',
+    },
+  ];
 
   return (
     <AppLayout currentPath="/app">
@@ -58,7 +112,7 @@ export const Dashboard = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {stats.map((stat) => {
+          {statsDisplay.map((stat) => {
             const Icon = stat.icon;
             return (
               <div key={stat.name} className="card">

@@ -22,6 +22,7 @@ export const Audience = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -67,6 +68,75 @@ export const Audience = () => {
     },
   ];
 
+  const handleExportCSV = () => {
+    const csv = [
+      ['Email', 'First Name', 'Last Name', 'Engagement Score', 'Status', 'Created'],
+      ...filteredContacts.map(c => [
+        c.email,
+        c.first_name || '',
+        c.last_name || '',
+        c.engagement_score,
+        c.status,
+        new Date(c.created_at).toLocaleDateString()
+      ])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setImporting(true);
+
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim());
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+
+      const emailIndex = headers.findIndex(h => h.includes('email'));
+      const firstNameIndex = headers.findIndex(h => h.includes('first') && h.includes('name'));
+      const lastNameIndex = headers.findIndex(h => h.includes('last') && h.includes('name'));
+
+      if (emailIndex === -1) {
+        alert('CSV must contain an email column');
+        return;
+      }
+
+      const newContacts = lines.slice(1).map(line => {
+        const values = line.split(',').map(v => v.trim());
+        return {
+          user_id: user.id,
+          email: values[emailIndex],
+          first_name: firstNameIndex !== -1 ? values[firstNameIndex] : null,
+          last_name: lastNameIndex !== -1 ? values[lastNameIndex] : null,
+          status: 'active',
+          engagement_score: 0
+        };
+      }).filter(c => c.email);
+
+      const { error } = await supabase.from('contacts').insert(newContacts);
+
+      if (error) throw error;
+
+      await fetchContacts();
+      alert(`Successfully imported ${newContacts.length} contacts!`);
+      e.target.value = '';
+    } catch (error: any) {
+      console.error('Import error:', error);
+      alert(error.message || 'Failed to import contacts');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <AppLayout currentPath="/app/audience">
       <div className="p-8">
@@ -76,7 +146,29 @@ export const Audience = () => {
             <p className="text-gray-600">Manage your contacts, tags, and segments.</p>
           </div>
           <div className="flex gap-3">
-            <Button variant="secondary" size="md" icon={Download}>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleImportCSV}
+              className="hidden"
+              id="csv-upload"
+              disabled={importing}
+            />
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => document.getElementById('csv-upload')?.click()}
+              disabled={importing}
+            >
+              {importing ? 'Importing...' : 'Import CSV'}
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              icon={Download}
+              onClick={handleExportCSV}
+              disabled={contacts.length === 0}
+            >
               Export
             </Button>
             <Button

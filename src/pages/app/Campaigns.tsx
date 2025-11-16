@@ -24,6 +24,7 @@ export const Campaigns = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -51,6 +52,72 @@ export const Campaigns = () => {
     campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     campaign.subject?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleSendCampaign = async (campaignId: string) => {
+    if (!confirm('Are you sure you want to send this campaign to all contacts?')) return;
+
+    setSending(campaignId);
+
+    try {
+      const campaign = campaigns.find(c => c.id === campaignId);
+      if (!campaign) throw new Error('Campaign not found');
+
+      const { data: contacts, error: contactsError } = await supabase
+        .from('contacts')
+        .select('id, email, first_name, last_name')
+        .eq('status', 'active');
+
+      if (contactsError) throw contactsError;
+
+      if (!contacts || contacts.length === 0) {
+        alert('No active contacts found');
+        return;
+      }
+
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.access_token) throw new Error('Not authenticated');
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`;
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          campaign_id: campaignId,
+          from_email: user?.email || 'hello@mailwizard.com',
+          from_name: user?.user_metadata?.full_name || 'Mail Wizard',
+          subject: campaign.subject,
+          html_body: campaign.content?.html || '',
+          recipients: contacts.map(c => ({
+            email: c.email,
+            contact_id: c.id,
+            first_name: c.first_name || '',
+            last_name: c.last_name || ''
+          })),
+          track_opens: true,
+          track_clicks: true
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to send campaign');
+      }
+
+      const data = await response.json();
+      await fetchCampaigns();
+
+      alert(`Campaign sent to ${data.sent} recipients!`);
+    } catch (error: any) {
+      console.error('Send error:', error);
+      alert(error.message || 'Failed to send campaign');
+    } finally {
+      setSending(null);
+    }
+  };
 
   return (
     <AppLayout currentPath="/app/campaigns">
@@ -150,7 +217,14 @@ export const Campaigns = () => {
                       {new Date(campaign.created_at).toLocaleDateString()}
                     </div>
                     {campaign.status === 'draft' && (
-                      <Button variant="primary" size="sm" icon={Send}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={Send}
+                        onClick={() => handleSendCampaign(campaign.id)}
+                        loading={sending === campaign.id}
+                        disabled={sending !== null}
+                      >
                         Send
                       </Button>
                     )}

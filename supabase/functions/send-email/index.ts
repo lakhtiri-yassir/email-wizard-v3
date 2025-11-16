@@ -1,4 +1,5 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,12 +7,24 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-interface EmailRequest {
-  to: string[];
-  from: string;
+interface Recipient {
+  email: string;
+  contact_id: string;
+  first_name?: string;
+  last_name?: string;
+  [key: string]: any;
+}
+
+interface SendEmailRequest {
+  campaign_id: string;
+  from_email: string;
+  from_name: string;
   subject: string;
-  html: string;
-  text?: string;
+  html_body: string;
+  text_body?: string;
+  recipients: Recipient[];
+  track_opens?: boolean;
+  track_clicks?: boolean;
 }
 
 Deno.serve(async (req: Request) => {
@@ -23,69 +36,198 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const sendgridApiKey = Deno.env.get('SENDGRID_API_KEY');
-    if (!sendgridApiKey) {
+    const SENDGRID_API_KEY = Deno.env.get('SENDGRID_API_KEY');
+    const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+    const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+
+    if (!SENDGRID_API_KEY) {
       throw new Error('SendGrid API key not configured');
     }
 
-    const emailData: EmailRequest = await req.json();
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    const personalizations = emailData.to.map((email) => ({
-      to: [{ email }],
-    }));
+    const authHeader = req.headers.get('Authorization')!;
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
 
-    const sendgridPayload = {
-      personalizations,
-      from: { email: emailData.from },
-      subject: emailData.subject,
-      content: [
-        {
-          type: 'text/html',
-          value: emailData.html,
-        },
-      ],
+    if (authError || !user) {
+      throw new Error('Unauthorized');
+    }
+
+    const requestData: SendEmailRequest = await req.json();
+    const {
+      campaign_id,
+      from_email,
+      from_name,
+      subject,
+      html_body,
+      text_body,
+      recipients,
+      track_opens = true,
+      track_clicks = true
+    } = requestData;
+
+    console.log(`Processing campaign ${campaign_id} for ${recipients.length} recipients`);
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('plan_type')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const planLimits: Record<string, number> = {
+      free: 2000,
+      pro: 50000,
+      pro_plus: 250000
     };
 
-    if (emailData.text) {
-      sendgridPayload.content.unshift({
-        type: 'text/plain',
-        value: emailData.text,
-      });
+    const monthlyLimit = planLimits[profile?.plan_type || 'free'] || 2000;
+
+    const now = new Date();
+    const { data: usage } = await supabase
+      .from('usage_metrics')
+      .select('emails_sent')
+      .eq('user_id', user.id)
+      .eq('month', now.getMonth() + 1)
+      .eq('year', now.getFullYear())
+      .maybeSingle();
+
+    const currentUsage = usage?.emails_sent || 0;
+
+    if (currentUsage + recipients.length > monthlyLimit) {
+      return new Response(
+        JSON.stringify({
+          error: 'Monthly quota exceeded',
+          current: currentUsage,
+          limit: monthlyLimit,
+          requested: recipients.length
+        }),
+        {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
     }
 
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${sendgridApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(sendgridPayload),
+    const batchSize = 1000;
+    let totalSent = 0;
+    const failedRecipients: string[] = [];
+
+    for (let i = 0; i < recipients.length; i += batchSize) {
+      const batch = recipients.slice(i, i + batchSize);
+
+      const personalizations = batch.map(recipient => {
+        let personalizedSubject = subject;
+        let personalizedHtml = html_body;
+        let personalizedText = text_body || '';
+
+        Object.keys(recipient).forEach(key => {
+          const value = recipient[key] || '';
+          const tag = `{{${key}}}`;
+          personalizedSubject = personalizedSubject.replace(new RegExp(tag, 'g'), value);
+          personalizedHtml = personalizedHtml.replace(new RegExp(tag, 'g'), value);
+          personalizedText = personalizedText.replace(new RegExp(tag, 'g'), value);
+        });
+
+        return {
+          to: [{ email: recipient.email }],
+          subject: personalizedSubject,
+          custom_args: {
+            contact_id: recipient.contact_id,
+            campaign_id: campaign_id,
+            user_id: user.id
+          }
+        };
+      });
+
+      const sendGridResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          personalizations,
+          from: { email: from_email, name: from_name },
+          content: [
+            { type: 'text/html', value: html_body },
+            { type: 'text/plain', value: text_body || html_body.replace(/<[^>]*>/g, '') }
+          ],
+          tracking_settings: {
+            click_tracking: { enable: track_clicks },
+            open_tracking: { enable: track_opens }
+          }
+        })
+      });
+
+      if (!sendGridResponse.ok) {
+        const error = await sendGridResponse.text();
+        console.error('SendGrid error:', error);
+        failedRecipients.push(...batch.map(r => r.email));
+        continue;
+      }
+
+      const events = batch.map(recipient => ({
+        campaign_id,
+        contact_id: recipient.contact_id,
+        event_type: 'sent',
+        timestamp: new Date().toISOString(),
+        metadata: { from_email, subject }
+      }));
+
+      await supabase.from('email_events').insert(events);
+
+      const campaignRecipients = batch.map(recipient => ({
+        campaign_id,
+        contact_id: recipient.contact_id,
+        status: 'sent',
+        sent_at: new Date().toISOString()
+      }));
+
+      await supabase.from('campaign_recipients').insert(campaignRecipients);
+
+      totalSent += batch.length;
+    }
+
+    await supabase
+      .from('campaigns')
+      .update({
+        status: 'sent',
+        sent_at: new Date().toISOString(),
+        recipients_count: totalSent
+      })
+      .eq('id', campaign_id);
+
+    await supabase.rpc('increment_usage', {
+      p_user_id: user.id,
+      p_month: now.getMonth() + 1,
+      p_year: now.getFullYear(),
+      p_emails_sent: totalSent
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`SendGrid API error: ${errorText}`);
-    }
+    console.log(`Successfully sent ${totalSent} emails for campaign ${campaign_id}`);
 
     return new Response(
-      JSON.stringify({ success: true, message: 'Emails queued for sending' }),
+      JSON.stringify({
+        success: true,
+        sent: totalSent,
+        failed: failedRecipients.length,
+        failed_recipients: failedRecipients
+      }),
       {
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
-  } catch (error) {
-    console.error('Error sending email:', error);
+
+  } catch (error: any) {
+    console.error('Error in send-email function:', error);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({
+        error: error.message || 'Internal server error'
+      }),
       {
         status: 500,
-        headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
   }
