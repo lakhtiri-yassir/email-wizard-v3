@@ -4,6 +4,7 @@ import { AppLayout } from '../../components/app/AppLayout';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
+import { useStripeCheckout } from '../../hooks/useStripeCheckout';
 
 const tabs = [
   { id: 'profile', label: 'Profile', icon: User },
@@ -17,6 +18,11 @@ const tabs = [
 export const Settings = () => {
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('profile');
+  const { createCheckoutSession, loading: checkoutLoading } = useStripeCheckout();
+
+  const handleUpgrade = (plan: 'pro' | 'pro_plus') => {
+    createCheckoutSession(plan);
+  };
 
   return (
     <AppLayout currentPath="/app/settings">
@@ -92,9 +98,36 @@ export const Settings = () => {
                         {profile?.plan_type.replace('_', ' ').toUpperCase()}
                       </p>
                     </div>
-                    <Button variant="primary" size="md">
-                      Upgrade Plan
-                    </Button>
+                    {profile?.plan_type === 'free' && (
+                      <div className="flex gap-2">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleUpgrade('pro')}
+                          loading={checkoutLoading}
+                        >
+                          Upgrade to Pro
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleUpgrade('pro_plus')}
+                          loading={checkoutLoading}
+                        >
+                          Upgrade to Pro Plus
+                        </Button>
+                      </div>
+                    )}
+                    {profile?.plan_type === 'pro' && (
+                      <Button
+                        variant="primary"
+                        size="md"
+                        onClick={() => handleUpgrade('pro_plus')}
+                        loading={checkoutLoading}
+                      >
+                        Upgrade to Pro Plus
+                      </Button>
+                    )}
                   </div>
                   <p className="text-sm text-gray-600">
                     {profile?.plan_type === 'free' && 'Free forever • 500 emails/month'}
@@ -129,7 +162,12 @@ export const Settings = () => {
                     <p className="text-sm text-gray-600 mb-4">
                       Upgrade to Pro Plus to access our powerful API
                     </p>
-                    <Button variant="primary" size="sm">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleUpgrade('pro_plus')}
+                      loading={checkoutLoading}
+                    >
                       Upgrade Now
                     </Button>
                   </div>
@@ -158,7 +196,12 @@ export const Settings = () => {
                     <p className="text-sm text-gray-600 mb-4">
                       Upgrade to use your own sending domain
                     </p>
-                    <Button variant="primary" size="sm">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleUpgrade('pro')}
+                      loading={checkoutLoading}
+                    >
                       Upgrade Now
                     </Button>
                   </div>
