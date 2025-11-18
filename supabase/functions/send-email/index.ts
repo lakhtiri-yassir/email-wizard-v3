@@ -188,8 +188,8 @@ Deno.serve(async (req: Request) => {
               personalizations,
               from: { email: from_email, name: from_name },
               content: [
-                { type: 'text/html', value: html_body },
                 { type: 'text/plain', value: text_body || html_body.replace(/<[^>]*>/g, '') }
+                { type: 'text/html', value: html_body },
               ],
               tracking_settings: {
                 click_tracking: { enable: track_clicks },
