@@ -131,7 +131,7 @@ export const TemplateEditor: React.FC = () => {
           <div className="flex items-center gap-3">
             <Lock size={20} className="text-amber-600" />
             <p className="text-sm text-amber-800">
-              This template includes personalization fields ({{'{'}firstname{'}'}, {{'{'}company{'}'}}). 
+              This template includes personalization fields ({{firstname}}, {{company}}). 
               <span className="font-semibold"> Upgrade to Pro Plus</span> to use these features.
             </p>
             <Button
