@@ -6,10 +6,10 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { TemplateSelector } from '../components/campaigns/TemplateSelector';
-import { RecipientSelector } from '../components/campaigns/RecipientSelector';
-import { EMAIL_TEMPLATES, extractEditableSections, extractMergeFields } from '../data/emailTemplates';
-import { replaceEditableSections } from '../utils/mergeFieldReplacer';
+import { TemplateSelector } from '../../components/campaigns/TemplateSelector';
+import { RecipientSelector } from '../../components/campaigns/RecipientSelector';
+import { EMAIL_TEMPLATES, extractEditableSections, extractMergeFields } from '../../data/emailTemplates';
+import { replaceEditableSections } from '../../utils/mergeFieldReplacer';
 
 interface Campaign {
   id: string;
