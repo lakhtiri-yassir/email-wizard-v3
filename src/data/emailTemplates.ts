@@ -9,6 +9,269 @@ export interface EmailTemplate {
 }
 
 export const EMAIL_TEMPLATES: EmailTemplate[] = [
+  // ADD THESE TO THE EXISTING EMAIL_TEMPLATES ARRAY:
+
+{
+  id: 'newsletter-modern',
+  name: 'Modern Newsletter',
+  category: 'newsletter',
+  description: 'Clean newsletter layout with article sections',
+  supportsPersonalization: true,
+  htmlContent: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background-color: #57377d; color: #ffffff; padding: 40px 30px; text-align: center; }
+        .content { padding: 30px; }
+        .article { margin-bottom: 30px; padding-bottom: 30px; border-bottom: 1px solid #e0e0e0; }
+        .article h2 { color: #333333; margin-top: 0; }
+        .article p { color: #666666; line-height: 1.6; }
+        .footer { background-color: #f8f8f8; padding: 20px; text-align: center; font-size: 12px; color: #999999; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>{{EDITABLE:newsletter_title}}</h1>
+          <p>{{EDITABLE:newsletter_subtitle}}</p>
+        </div>
+        <div class="content">
+          <p>Hi {{firstname}},</p>
+          <p>{{EDITABLE:intro_text}}</p>
+          
+          <div class="article">
+            <h2>{{EDITABLE:article1_title}}</h2>
+            <p>{{EDITABLE:article1_content}}</p>
+            <a href="#" style="color: #f3ba42;">Read more →</a>
+          </div>
+          
+          <div class="article">
+            <h2>{{EDITABLE:article2_title}}</h2>
+            <p>{{EDITABLE:article2_content}}</p>
+            <a href="#" style="color: #f3ba42;">Read more →</a>
+          </div>
+          
+          <div class="article" style="border-bottom: none;">
+            <h2>{{EDITABLE:article3_title}}</h2>
+            <p>{{EDITABLE:article3_content}}</p>
+            <a href="#" style="color: #f3ba42;">Read more →</a>
+          </div>
+        </div>
+        <div class="footer">
+          <p>You're receiving this because you subscribed to our newsletter.</p>
+          <p><a href="#">Unsubscribe</a></p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+},
+
+{
+  id: 'product-launch',
+  name: 'Product Launch',
+  category: 'announcement',
+  description: 'Exciting product announcement with strong CTA',
+  supportsPersonalization: false,
+  htmlContent: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .hero { background: linear-gradient(135deg, #57377d 0%, #f3ba42 100%); color: #ffffff; padding: 60px 30px; text-align: center; }
+        .hero h1 { font-size: 36px; margin: 0 0 15px 0; }
+        .content { padding: 40px 30px; text-align: center; }
+        .cta-button { display: inline-block; background-color: #f3ba42; color: #000000; padding: 15px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; margin: 20px 0; }
+        .features { padding: 0 30px 40px 30px; }
+        .feature { margin-bottom: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="hero">
+          <h1>{{EDITABLE:product_name}}</h1>
+          <p style="font-size: 18px;">{{EDITABLE:tagline}}</p>
+        </div>
+        <div class="content">
+          <h2>{{EDITABLE:announcement_heading}}</h2>
+          <p>{{EDITABLE:announcement_text}}</p>
+          <a href="#" class="cta-button">{{EDITABLE:cta_text}}</a>
+        </div>
+        <div class="features">
+          <div class="feature">
+            <h3>✨ {{EDITABLE:feature1_title}}</h3>
+            <p>{{EDITABLE:feature1_description}}</p>
+          </div>
+          <div class="feature">
+            <h3>🚀 {{EDITABLE:feature2_title}}</h3>
+            <p>{{EDITABLE:feature2_description}}</p>
+          </div>
+          <div class="feature">
+            <h3>💡 {{EDITABLE:feature3_title}}</h3>
+            <p>{{EDITABLE:feature3_description}}</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+},
+
+{
+  id: 'event-invitation',
+  name: 'Event Invitation',
+  category: 'marketing',
+  description: 'Professional event invitation with RSVP',
+  supportsPersonalization: true,
+  htmlContent: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 3px solid #f3ba42; }
+        .header { background-color: #57377d; color: #ffffff; padding: 40px 30px; text-align: center; }
+        .content { padding: 40px 30px; }
+        .event-details { background-color: #f8f8f8; padding: 20px; margin: 20px 0; border-left: 4px solid #f3ba42; }
+        .cta-button { display: inline-block; background-color: #f3ba42; color: #000000; padding: 15px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; margin: 20px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>You're Invited!</h1>
+        </div>
+        <div class="content">
+          <p>Hi {{firstname}},</p>
+          <p>{{EDITABLE:invitation_message}}</p>
+          
+          <div class="event-details">
+            <h2>{{EDITABLE:event_name}}</h2>
+            <p><strong>📅 Date:</strong> {{EDITABLE:event_date}}</p>
+            <p><strong>🕐 Time:</strong> {{EDITABLE:event_time}}</p>
+            <p><strong>📍 Location:</strong> {{EDITABLE:event_location}}</p>
+          </div>
+          
+          <p>{{EDITABLE:event_description}}</p>
+          
+          <div style="text-align: center;">
+            <a href="#" class="cta-button">{{EDITABLE:rsvp_button_text}}</a>
+          </div>
+          
+          <p style="font-size: 14px; color: #666666;">{{EDITABLE:additional_info}}</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+},
+
+{
+  id: 'welcome-series',
+  name: 'Welcome Email',
+  category: 'marketing',
+  description: 'Warm welcome for new subscribers',
+  supportsPersonalization: true,
+  htmlContent: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; }
+        .header { background: linear-gradient(135deg, #f3ba42 0%, #57377d 100%); color: #ffffff; padding: 50px 30px; text-align: center; }
+        .content { padding: 40px 30px; }
+        .welcome-box { background-color: #f8f8f8; padding: 30px; text-align: center; margin: 20px 0; border-radius: 10px; }
+        .cta-button { display: inline-block; background-color: #57377d; color: #ffffff; padding: 15px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; margin: 20px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Welcome, {{firstname}}! 🎉</h1>
+        </div>
+        <div class="content">
+          <div class="welcome-box">
+            <h2>{{EDITABLE:welcome_heading}}</h2>
+            <p>{{EDITABLE:welcome_message}}</p>
+          </div>
+          
+          <h3>{{EDITABLE:next_steps_heading}}</h3>
+          <p>{{EDITABLE:next_steps_intro}}</p>
+          
+          <ul style="line-height: 2;">
+            <li>{{EDITABLE:step1}}</li>
+            <li>{{EDITABLE:step2}}</li>
+            <li>{{EDITABLE:step3}}</li>
+          </ul>
+          
+          <div style="text-align: center;">
+            <a href="#" class="cta-button">{{EDITABLE:cta_text}}</a>
+          </div>
+          
+          <p style="margin-top: 30px;">{{EDITABLE:closing_message}}</p>
+          <p><strong>{{EDITABLE:signature}}</strong></p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `
+},
+
+{
+  id: 'sales-follow-up',
+  name: 'Sales Follow-Up',
+  category: 'sales',
+  description: 'Professional follow-up for sales prospects',
+  supportsPersonalization: true,
+  htmlContent: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #ffffff; }
+        .container { max-width: 600px; margin: 0 auto; padding: 40px 30px; }
+        .highlight { background-color: #fffbea; border-left: 4px solid #f3ba42; padding: 15px; margin: 20px 0; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <p>Hi {{firstname}},</p>
+        
+        <p>{{EDITABLE:opening_line}}</p>
+        
+        <p>I wanted to follow up on {{EDITABLE:context}} and see if you had any questions about {{EDITABLE:topic}}.</p>
+        
+        <div class="highlight">
+          <strong>{{EDITABLE:value_prop_heading}}</strong>
+          <p>{{EDITABLE:value_prop_text}}</p>
+        </div>
+        
+        <p>Based on your role as {{role}} at {{company}}, I think you'd especially benefit from:</p>
+        
+        <ul>
+          <li>{{EDITABLE:benefit1}}</li>
+          <li>{{EDITABLE:benefit2}}</li>
+          <li>{{EDITABLE:benefit3}}</li>
+        </ul>
+        
+        <p>{{EDITABLE:call_to_action}}</p>
+        
+        <p>{{EDITABLE:closing}}</p>
+        
+        <p>Best regards,<br>
+        <strong>{{EDITABLE:sender_name}}</strong><br>
+        {{EDITABLE:sender_title}}</p>
+      </div>
+    </body>
+    </html>
+  `
+},
   {
     id: 'professional-announcement',
     name: 'Professional Announcement',
@@ -380,6 +643,7 @@ Best,
   </div>
 </body>
 </html>`
+
   }
 ];
 

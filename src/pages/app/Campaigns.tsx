@@ -6,6 +6,10 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { TemplateSelector } from '../components/campaigns/TemplateSelector';
+import { RecipientSelector } from '../components/campaigns/RecipientSelector';
+import { EMAIL_TEMPLATES, extractEditableSections, extractMergeFields } from '../data/emailTemplates';
+import { replaceEditableSections } from '../utils/mergeFieldReplacer';
 
 interface Campaign {
   id: string;
@@ -266,95 +270,343 @@ interface CreateCampaignModalProps {
 
 const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalProps) => {
   const { user } = useAuth();
-  const [name, setName] = useState('');
+  
+  // Multi-step state
+  const [step, setStep] = useState<'template' | 'edit' | 'recipients' | 'review'>('template');
+  
+  // Campaign data
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [campaignName, setCampaignName] = useState('');
   const [subject, setSubject] = useState('');
-  const [htmlContent, setHtmlContent] = useState('');
+  const [editedContent, setEditedContent] = useState<Record<string, string>>({});
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
+  // Get selected template
+  const selectedTemplate = EMAIL_TEMPLATES.find(t => t.id === selectedTemplateId);
+  const editableSections = selectedTemplate ? extractEditableSections(selectedTemplate.htmlContent) : [];
+  const hasPersonalization = selectedTemplate ? selectedTemplate.supportsPersonalization : false;
+
+  const handleTemplateSelect = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = EMAIL_TEMPLATES.find(t => t.id === templateId);
+    if (template) {
+      setCampaignName(template.name);
+      setSubject(''); // User will fill this
+    }
+  };
+
+  const handleNextFromTemplate = () => {
+    if (!selectedTemplateId) {
+      setError('Please select a template');
+      return;
+    }
+    setStep('edit');
+  };
+
+  const handleNextFromEdit = () => {
+    if (!campaignName.trim()) {
+      setError('Please enter a campaign name');
+      return;
+    }
+    if (!subject.trim()) {
+      setError('Please enter a subject line');
+      return;
+    }
+    setStep('recipients');
+  };
+
+  const handleNextFromRecipients = () => {
+    if (!selectedGroupId) {
+      setError('Please select a recipient group');
+      return;
+    }
+    setStep('review');
+  };
+
+  const handleCreateAndSend = async () => {
+    if (!user || !selectedTemplate || !selectedGroupId) return;
 
     setLoading(true);
     setError('');
 
     try {
-      const { error } = await supabase.from('campaigns').insert({
-        user_id: user.id,
-        name,
-        subject,
-        content: { html: htmlContent },
-        status: 'draft',
+      // Replace editable sections with user content
+      const finalHtml = replaceEditableSections(selectedTemplate.htmlContent, editedContent);
+      
+      // Fetch contacts from selected group
+      const { data: groupMembers, error: groupError } = await supabase
+        .from('contact_group_members')
+        .select('contact_id')
+        .eq('group_id', selectedGroupId);
+      
+      if (groupError) throw groupError;
+      
+      const contactIds = groupMembers.map(m => m.contact_id);
+      
+      const { data: contacts, error: contactsError } = await supabase
+        .from('contacts')
+        .select('*')
+        .in('id', contactIds)
+        .eq('status', 'active');
+      
+      if (contactsError) throw contactsError;
+
+      // Create campaign
+      const { data: campaign, error: campaignError } = await supabase
+        .from('campaigns')
+        .insert({
+          user_id: user.id,
+          name: campaignName,
+          subject: subject,
+          content: { html: finalHtml },
+          status: 'draft',
+          recipients_count: contacts?.length || 0
+        })
+        .select()
+        .single();
+
+      if (campaignError) throw campaignError;
+
+      // Send campaign
+      const { data, error: sendError } = await supabase.functions.invoke('send-email', {
+        body: {
+          campaign_id: campaign.id,
+          from_email: user.email,
+          subject: subject,
+          html_body: finalHtml,
+          recipients: contacts?.map(c => ({
+            email: c.email,
+            contact_id: c.id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            company: c.company,
+            role: c.role,
+            industry: c.industry
+          })) || []
+        }
       });
 
-      if (error) throw error;
+      if (sendError) throw sendError;
 
+      toast.success(`Campaign sent to ${contacts?.length || 0} recipients!`);
       onSuccess();
       onClose();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create campaign');
+    } catch (error: any) {
+      console.error('Campaign error:', error);
+      setError(error.message || 'Failed to create campaign');
+      toast.error('Failed to send campaign');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl border border-black max-w-2xl w-full p-6 animate-slide-up max-h-[90vh] overflow-y-auto">
-        <h2 className="text-2xl font-serif font-bold mb-4">Create Campaign</h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b border-black p-6 z-10">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-serif font-bold">Create Campaign</h2>
+              <div className="flex items-center gap-2 mt-2">
+                <span className={`text-sm ${step === 'template' ? 'text-[#f3ba42] font-semibold' : 'text-gray-400'}`}>
+                  1. Template
+                </span>
+                <span className="text-gray-300">→</span>
+                <span className={`text-sm ${step === 'edit' ? 'text-[#f3ba42] font-semibold' : 'text-gray-400'}`}>
+                  2. Edit
+                </span>
+                <span className="text-gray-300">→</span>
+                <span className={`text-sm ${step === 'recipients' ? 'text-[#f3ba42] font-semibold' : 'text-gray-400'}`}>
+                  3. Recipients
+                </span>
+                <span className="text-gray-300">→</span>
+                <span className={`text-sm ${step === 'review' ? 'text-[#f3ba42] font-semibold' : 'text-gray-400'}`}>
+                  4. Review
+                </span>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-gray-500 hover:text-black">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="p-6">
           {error && (
-            <div className="bg-red-50 border border-red-600 text-red-600 px-4 py-3 rounded-lg text-sm">
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-4">
               {error}
             </div>
           )}
 
-          <Input
-            type="text"
-            label="Campaign Name"
-            placeholder="Summer Sale Newsletter"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-
-          <Input
-            type="text"
-            label="Subject Line"
-            placeholder="50% Off Everything!"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            required
-          />
-
-          <div>
-            <label className="block text-sm font-medium mb-2">Email Content (HTML)</label>
-            <textarea
-              className="input-base w-full h-48 font-mono text-sm"
-              placeholder="<h1>Hello!</h1><p>Your email content here...</p>"
-              value={htmlContent}
-              onChange={(e) => setHtmlContent(e.target.value)}
-              required
+          {/* Step 1: Template Selection */}
+          {step === 'template' && (
+            <TemplateSelector
+              onSelect={handleTemplateSelect}
+              selectedTemplateId={selectedTemplateId}
             />
-          </div>
+          )}
 
-          <div className="flex gap-3 pt-4">
-            <Button
-              type="button"
-              variant="secondary"
-              size="md"
-              fullWidth
-              onClick={onClose}
-              disabled={loading}
-            >
+          {/* Step 2: Edit Content */}
+          {step === 'edit' && selectedTemplate && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-serif font-bold">Edit Campaign Content</h2>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Campaign Name *</label>
+                <input
+                  type="text"
+                  value={campaignName}
+                  onChange={(e) => setCampaignName(e.target.value)}
+                  className="input-base w-full"
+                  placeholder="e.g., Summer Newsletter 2025"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Subject Line *</label>
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  className="input-base w-full"
+                  placeholder="Enter email subject line"
+                />
+                {hasPersonalization && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    💡 You can use merge fields: {'{'}{'{'}}firstname{'}'}{'}'}, {'{'}{'{'}}company{'}'}{'}'}, {'{'}{'{'}}role{'}'}{'}'}, etc.
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="font-semibold mb-3">Editable Sections</h3>
+                {editableSections.map((section) => (
+                  <div key={section.id} className="mb-4">
+                    <label className="block text-sm font-medium mb-2 capitalize">
+                      {section.id.replace(/_/g, ' ')}
+                    </label>
+                    {section.id.includes('content') || section.id.includes('description') || section.id.includes('message') ? (
+                      <textarea
+                        value={editedContent[section.id] || ''}
+                        onChange={(e) => setEditedContent({ ...editedContent, [section.id]: e.target.value })}
+                        className="input-base w-full"
+                        rows={3}
+                        placeholder={`Enter ${section.id.replace(/_/g, ' ')}`}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={editedContent[section.id] || ''}
+                        onChange={(e) => setEditedContent({ ...editedContent, [section.id]: e.target.value })}
+                        className="input-base w-full"
+                        placeholder={`Enter ${section.id.replace(/_/g, ' ')}`}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Select Recipients */}
+          {step === 'recipients' && (
+            <RecipientSelector
+              onSelect={setSelectedGroupId}
+              selectedGroupId={selectedGroupId}
+              templateHasPersonalization={hasPersonalization}
+            />
+          )}
+
+          {/* Step 4: Review & Send */}
+          {step === 'review' && (
+            <div className="space-y-4">
+              <h2 className="text-xl font-serif font-bold">Review & Send</h2>
+              
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                <div>
+                  <span className="text-sm text-gray-600">Campaign Name:</span>
+                  <p className="font-semibold">{campaignName}</p>
+                </div>
+                <div>
+                  <span className="text-sm text-gray-600">Subject Line:</span>
+                  <p className="font-semibold">{subject}</p>
+                </div>
+                <div>
+                  <span className="text-sm text-gray-600">Template:</span>
+                  <p className="font-semibold">{selectedTemplate?.name}</p>
+                </div>
+                <div>
+                  <span className="text-sm text-gray-600">Recipients:</span>
+                  <p className="font-semibold">Selected contact group</p>
+                </div>
+              </div>
+
+              {hasPersonalization && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <p className="text-sm text-amber-800 font-medium">
+                    📧 This campaign uses personalization
+                  </p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Each recipient will receive a personalized email with their name, company, and other details.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="sticky bottom-0 bg-white border-t border-black p-6 flex items-center justify-between">
+          <div>
+            {step !== 'template' && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (step === 'edit') setStep('template');
+                  if (step === 'recipients') setStep('edit');
+                  if (step === 'review') setStep('recipients');
+                }}
+              >
+                ← Back
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="tertiary" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="md" fullWidth loading={loading}>
-              Create Campaign
-            </Button>
+            {step === 'template' && (
+              <Button variant="primary" onClick={handleNextFromTemplate}>
+                Next: Edit Content →
+              </Button>
+            )}
+            {step === 'edit' && (
+              <Button variant="primary" onClick={handleNextFromEdit}>
+                Next: Select Recipients →
+              </Button>
+            )}
+            {step === 'recipients' && (
+              <Button variant="primary" onClick={handleNextFromRecipients}>
+                Next: Review →
+              </Button>
+            )}
+            {step === 'review' && (
+              <Button
+                variant="primary"
+                onClick={handleCreateAndSend}
+                loading={loading}
+                disabled={loading}
+              >
+                Send Campaign 🚀
+              </Button>
+            )}
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

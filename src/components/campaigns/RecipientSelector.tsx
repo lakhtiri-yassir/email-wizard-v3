@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../ui/Button';
@@ -12,33 +12,34 @@ interface ContactGroup {
 }
 
 interface RecipientSelectorProps {
-  onSelect: (groupId: string, groupName: string, contactCount: number) => void;
+  onSelect: (groupId: string) => void;
+  selectedGroupId: string | null;
   templateHasPersonalization: boolean;
 }
 
-export const RecipientSelector: React.FC<RecipientSelectorProps> = ({ 
+export const RecipientSelector = ({
   onSelect,
-  templateHasPersonalization 
-}) => {
+  selectedGroupId,
+  templateHasPersonalization
+}: RecipientSelectorProps) => {
   const { user } = useAuth();
   const [groups, setGroups] = useState<ContactGroup[]>([]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchGroups();
-  }, []);
+  }, [user]);
 
   const fetchGroups = async () => {
     if (!user) return;
-
+    
     try {
       const { data, error } = await supabase
         .from('contact_groups')
         .select('*')
         .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
+        .order('name');
+      
       if (error) throw error;
       setGroups(data || []);
     } catch (error) {
@@ -48,39 +49,16 @@ export const RecipientSelector: React.FC<RecipientSelectorProps> = ({
     }
   };
 
-  const handleSelectGroup = async (groupId: string) => {
-    setSelectedGroupId(groupId);
-    
-    const group = groups.find(g => g.id === groupId);
-    if (group) {
-      // Check for missing personalization data if template uses merge fields
-      if (templateHasPersonalization) {
-        const { data: contacts } = await supabase
-          .from('contacts')
-          .select('first_name, company, role, industry')
-          .in('id', 
-            await supabase
-              .from('contact_group_members')
-              .select('contact_id')
-              .eq('group_id', groupId)
-          );
-        
-        const missingData = contacts?.filter(c => 
-          !c.first_name || !c.company || !c.role
-        ).length || 0;
-        
-        if (missingData > 0) {
-          // Show warning but allow to continue
-          console.warn(`${missingData} contacts missing personalization data`);
-        }
-      }
-      
-      onSelect(groupId, group.name, group.contact_count);
-    }
+  const handleSelectGroup = (groupId: string) => {
+    onSelect(groupId);
   };
 
   if (loading) {
-    return <div>Loading groups...</div>;
+    return (
+      <div className="text-center py-8">
+        <p className="text-gray-600">Loading contact groups...</p>
+      </div>
+    );
   }
 
   if (groups.length === 0) {
