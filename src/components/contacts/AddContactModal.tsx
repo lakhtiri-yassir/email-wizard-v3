@@ -10,7 +10,7 @@ interface AddContactModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  groups: Array<{ id: string; name: string }>;
+  groups?: Array<{ id: string; name: string }>; // Made optional with default
 }
 
 const INDUSTRIES = [
@@ -26,7 +26,7 @@ const INDUSTRIES = [
   'Other'
 ];
 
-export const AddContactModal = ({ isOpen, onClose, onSuccess, groups }: AddContactModalProps) => {
+export const AddContactModal = ({ isOpen, onClose, onSuccess, groups = [] }: AddContactModalProps) => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -181,7 +181,8 @@ export const AddContactModal = ({ isOpen, onClose, onSuccess, groups }: AddConta
           </div>
         </div>
 
-        {groups.length > 0 && (
+        {/* Only show groups section if groups array has items */}
+        {groups && groups.length > 0 && (
           <div>
             <label className="block text-sm font-semibold mb-2">Add to Groups (Optional)</label>
             <div className="border border-gray-200 rounded-lg p-4 max-h-40 overflow-y-auto">
