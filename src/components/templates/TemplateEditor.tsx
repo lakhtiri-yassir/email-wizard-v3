@@ -1,8 +1,7 @@
 // ============================================================================
-// FIXED: TemplateEditor with Proper HTML Preview Rendering
+// FINAL FIX: TemplateEditor with Proper HTML Preview (No Yellow Shadow + Reload Fix)
 // File: src/components/templates/TemplateEditor.tsx
 // ============================================================================
-// This version properly renders HTML with styles in an iframe for isolation
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -78,19 +77,25 @@ export const TemplateEditor: React.FC = () => {
     }
   }, [templateId]);
 
-  // Update iframe preview whenever content changes
+  // Update iframe preview whenever content changes OR when preview is toggled
   useEffect(() => {
-    if (template && iframeRef.current) {
-      const previewHtml = getPreviewHtml();
-      const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-      
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(previewHtml);
-        iframeDoc.close();
-      }
+    if (template && iframeRef.current && showPreview) {
+      updatePreview();
     }
-  }, [editedContent, template, subject]);
+  }, [editedContent, template, subject, showPreview]);
+
+  const updatePreview = () => {
+    if (!iframeRef.current) return;
+    
+    const previewHtml = getPreviewHtml();
+    const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+    
+    if (iframeDoc) {
+      iframeDoc.open();
+      iframeDoc.write(previewHtml);
+      iframeDoc.close();
+    }
+  };
 
   const handleContentChange = (sectionId: string, value: string) => {
     setEditedContent(prev => ({
@@ -99,15 +104,15 @@ export const TemplateEditor: React.FC = () => {
     }));
   };
 
-  // Generate preview HTML with edited content
+  // Generate preview HTML with edited content (NO YELLOW BACKGROUND)
   const getPreviewHtml = () => {
     if (!template) return '';
     
     let previewHtml = template.htmlContent;
     
-    // Replace all {{EDITABLE:section_id}} with actual content
+    // Replace all {{EDITABLE:section_id}} with actual content (NO BACKGROUND STYLING)
     editableSections.forEach(section => {
-      const content = editedContent[section.id] || section.defaultContent || `<span style="background: #fff3cd; padding: 2px 4px;">[Enter ${section.label}]</span>`;
+      const content = editedContent[section.id] || section.defaultContent || `[Enter ${section.label}]`;
       const regex = new RegExp(`\\{\\{EDITABLE:${section.id}\\}\\}`, 'g');
       previewHtml = previewHtml.replace(regex, content);
     });
