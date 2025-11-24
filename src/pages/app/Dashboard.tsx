@@ -32,7 +32,7 @@ interface Campaign {
   sent_at: string;
 }
 
-export default function Dashboard() {
+export function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     totalEmailsSent: 0,
@@ -53,7 +53,6 @@ export default function Dashboard() {
     if (user) {
       fetchDashboardData();
       
-      // Refresh data every 30 seconds to show new webhook events
       const interval = setInterval(fetchDashboardData, 30000);
       return () => clearInterval(interval);
     }
@@ -61,7 +60,6 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      // Fetch campaigns
       const { data: campaigns, error: campaignsError } = await supabase
         .from('campaigns')
         .select('*')
@@ -72,7 +70,6 @@ export default function Dashboard() {
 
       if (campaignsError) throw campaignsError;
 
-      // Fetch active contacts count
       const { count: contactCount, error: contactsError } = await supabase
         .from('contacts')
         .select('*', { count: 'exact', head: true })
@@ -81,7 +78,6 @@ export default function Dashboard() {
 
       if (contactsError) throw contactsError;
 
-      // Fetch recent email events (last 20)
       const { data: events, error: eventsError } = await supabase
         .from('email_events')
         .select('id, event_type, email, timestamp, campaign_id')
@@ -91,7 +87,6 @@ export default function Dashboard() {
 
       if (eventsError) throw eventsError;
 
-      // Calculate aggregate stats
       const totalSent = campaigns?.reduce((sum, c) => sum + (c.recipients_count || 0), 0) || 0;
       const totalOpens = campaigns?.reduce((sum, c) => sum + (c.opens || 0), 0) || 0;
       const totalClicks = campaigns?.reduce((sum, c) => sum + (c.clicks || 0), 0) || 0;
@@ -189,7 +184,6 @@ export default function Dashboard() {
     <div className="p-8">
       <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
 
-      {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <div className="bg-white border rounded-lg p-6">
           <p className="text-sm text-gray-600 mb-1">Total Emails Sent</p>
@@ -215,7 +209,6 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Campaigns */}
         <div className="bg-white border rounded-lg p-6">
           <h2 className="text-xl font-bold mb-4">Recent Campaigns</h2>
           <div className="space-y-4">
@@ -248,7 +241,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Real-time Activity Feed */}
         <div className="bg-white border rounded-lg p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-bold">Real-time Activity</h2>
@@ -284,7 +276,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Performance Stats */}
       <div className="mt-8 bg-white border rounded-lg p-6">
         <h2 className="text-xl font-bold mb-4">Performance Overview</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
