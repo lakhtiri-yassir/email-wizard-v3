@@ -1,496 +1,513 @@
 import { useState, useEffect } from 'react';
-import { Mail, Plus, Send } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
-import { AppLayout } from '../../components/app/AppLayout';
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { supabase } from '../../lib/supabase';
-import { useAuth } from '../../contexts/AuthContext';
-import { TemplateSelector } from '../../components/campaigns/TemplateSelector';
-import { RecipientSelector } from '../../components/campaigns/RecipientSelector';
-import { EMAIL_TEMPLATES, extractEditableSections, extractMergeFields } from '../../data/emailTemplates';
-import { replaceEditableSections } from '../../utils/mergeFieldReplacer';
 
 interface Campaign {
   id: string;
   name: string;
   subject: string;
-  content: any;
+  content: { html: string };
   status: string;
   recipients_count: number;
   opens: number;
   clicks: number;
+  bounces: number;
+  sent_at: string | null;
   created_at: string;
 }
 
-export const Campaigns = () => {
+interface Contact {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  status: string;
+}
+
+interface Segment {
+  id: string;
+  name: string;
+  description: string | null;
+  contact_count?: number;
+}
+
+export default function Campaigns() {
   const { user } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [segments, setSegments] = useState<Segment[]>([]);
+  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
+  const [selectedSegments, setSelectedSegments] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [sending, setSending] = useState<string | null>(null);
-  const [createStep, setCreateStep] = useState<'template' | 'editor' | 'recipients' | 'review'>('template');
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [sendMode, setSendMode] = useState<'all' | 'groups' | 'contacts'>('all');
+
+  const [newCampaign, setNewCampaign] = useState({
+    name: '',
+    subject: '',
+    html_body: '<p>Hello {{firstname}}!</p><p>This is a test email.</p>',
+    from_name: '',
+    from_email: ''
+  });
 
   useEffect(() => {
     if (user) {
       fetchCampaigns();
+      fetchContacts();
+      fetchSegments();
     }
   }, [user]);
 
   const fetchCampaigns = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('campaigns')
+      .select('*')
+      .eq('user_id', user?.id)
+      .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setCampaigns(data || []);
-    } catch (error: any) {
+    if (error) {
       console.error('Error fetching campaigns:', error);
-      toast.error(error.message || 'Failed to load campaigns');
-    } finally {
-      setLoading(false);
+      toast.error('Failed to load campaigns');
+    } else {
+      setCampaigns(data || []);
     }
   };
 
-  const filteredCampaigns = campaigns.filter((campaign) =>
-    campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    campaign.subject?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const fetchContacts = async () => {
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*')
+      .eq('user_id', user?.id)
+      .eq('status', 'active')
+      .order('email');
 
-  const handleSendCampaign = async (campaignId: string) => {
-    if (!confirm('Are you sure you want to send this campaign to all contacts?')) return;
-
-    setSending(campaignId);
-    const toastId = toast.loading('Preparing to send campaign...');
-
-    try {
-      const campaign = campaigns.find(c => c.id === campaignId);
-      if (!campaign) {
-        throw new Error('Campaign not found');
-      }
-
-      toast.loading('Fetching contacts...', { id: toastId });
-      const { data: contacts, error: contactsError } = await supabase
-        .from('contacts')
-        .select('id, email, first_name, last_name')
-        .eq('status', 'active');
-
-      if (contactsError) throw contactsError;
-
-      if (!contacts || contacts.length === 0) {
-        toast.error('No active contacts found', { id: toastId });
-        return;
-      }
-
-      toast.loading(`Sending to ${contacts.length} recipients...`, { id: toastId });
-      const { data: session } = await supabase.auth.getSession();
-      if (!session?.session?.access_token) {
-        throw new Error('Not authenticated');
-      }
-
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-email`;
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          campaign_id: campaignId,
-          from_email: user?.email || 'hello@mailwizard.com',
-          from_name: user?.user_metadata?.full_name || 'Mail Wizard',
-          subject: campaign.subject,
-          html_body: campaign.content?.html || '',
-          recipients: contacts.map(c => ({
-            email: c.email,
-            contact_id: c.id,
-            first_name: c.first_name || '',
-            last_name: c.last_name || ''
-          })),
-          track_opens: true,
-          track_clicks: true
-        })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        if (response.status === 429) {
-          throw new Error('Rate limit exceeded. Please try again in a few minutes.');
-        }
-        throw new Error(error.message || error.error || 'Failed to send campaign');
-      }
-
-      const data = await response.json();
-      await fetchCampaigns();
-
-      toast.success(`Campaign sent to ${data.sent} recipients!`, { id: toastId });
-    } catch (error: any) {
-      console.error('Send error:', error);
-      toast.error(error.message || 'Failed to send campaign', { id: toastId });
-    } finally {
-      setSending(null);
+    if (error) {
+      console.error('Error fetching contacts:', error);
+    } else {
+      setContacts(data || []);
     }
   };
 
-  return (
-    <AppLayout currentPath="/app/campaigns">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-serif font-bold mb-2">Campaigns</h1>
-            <p className="text-gray-600">Create and manage your email campaigns.</p>
-          </div>
-          <Button
-            variant="primary"
-            size="md"
-            icon={Plus}
-            onClick={() => setShowCreateModal(true)}
-          >
-            Create Campaign
-          </Button>
-        </div>
+  const fetchSegments = async () => {
+    const { data, error } = await supabase
+      .from('segments')
+      .select('*')
+      .eq('user_id', user?.id)
+      .order('name');
 
-        <div className="card mb-6">
-          <div className="flex gap-4">
-            <div className="flex-1">
-              <Input
-                type="text"
-                placeholder="Search campaigns..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <select className="input-base w-auto">
-              <option>All Status</option>
-              <option>Draft</option>
-              <option>Scheduled</option>
-              <option>Sent</option>
-            </select>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-12">
-            <p className="text-gray-600">Loading campaigns...</p>
-          </div>
-        ) : filteredCampaigns.length === 0 ? (
-          <div className="card text-center py-12">
-            <Mail size={48} className="text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-600 mb-2">No campaigns found</p>
-            <p className="text-sm text-gray-500 mb-6">
-              {searchQuery
-                ? 'Try adjusting your search query'
-                : 'Get started by creating your first campaign'}
-            </p>
-            {!searchQuery && (
-              <Button variant="primary" size="md" onClick={() => setShowCreateModal(true)}>
-                Create Your First Campaign
-              </Button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {filteredCampaigns.map((campaign) => (
-              <div key={campaign.id} className="card hover:-translate-y-1 transition-all cursor-pointer">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <Mail className="text-gold" size={20} />
-                      <h3 className="text-lg font-semibold">{campaign.name}</h3>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          campaign.status === 'sent'
-                            ? 'bg-green-100 text-green-800'
-                            : campaign.status === 'draft'
-                            ? 'bg-gray-100 text-gray-800'
-                            : 'bg-gold/20 text-black'
-                        }`}
-                      >
-                        {campaign.status}
-                      </span>
-                    </div>
-                    <p className="text-gray-600 mb-3">{campaign.subject}</p>
-                    <div className="flex gap-6 text-sm">
-                      <div>
-                        <span className="text-gray-600">Sent: </span>
-                        <span className="font-semibold">{campaign.recipients_count.toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Opens: </span>
-                        <span className="font-semibold text-purple">{campaign.opens.toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Clicks: </span>
-                        <span className="font-semibold text-gold">{campaign.clicks.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-600 mb-2">
-                      {new Date(campaign.created_at).toLocaleDateString()}
-                    </div>
-                    {campaign.status === 'draft' && (
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        icon={Send}
-                        onClick={() => handleSendCampaign(campaign.id)}
-                        loading={sending === campaign.id}
-                        disabled={sending !== null}
-                      >
-                        Send
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {showCreateModal && (
-          <CreateCampaignModal
-            onClose={() => setShowCreateModal(false)}
-            onSuccess={fetchCampaigns}
-          />
-        )}
-      </div>
-    </AppLayout>
-  );
-};
-
-interface CreateCampaignModalProps {
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-const CreateCampaignModal = ({ onClose, onSuccess }: CreateCampaignModalProps) => {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-  
-  // Form state
-  const [campaignName, setCampaignName] = useState('');
-  const [subject, setSubject] = useState('');
-  const [contentChoice, setContentChoice] = useState<'template' | 'custom'>('template');
-  const [customHtml, setCustomHtml] = useState('');
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleBrowseTemplates = () => {
-    if (!campaignName.trim()) {
-      setError('Please enter a campaign name');
-      return;
+    if (error) {
+      console.error('Error fetching segments:', error);
+    } else {
+      setSegments(data || []);
     }
-    if (!subject.trim()) {
-      setError('Please enter a subject line');
-      return;
-    }
-
-    // Navigate to templates page with campaign context
-    const params = new URLSearchParams({
-      createMode: 'true',
-      name: campaignName,
-      subject: subject
-    });
-    navigate(`/app/templates?${params.toString()}`);
-    onClose();
   };
 
-  const handleCreateWithCustomHtml = async () => {
-    if (!campaignName.trim()) {
-      setError('Please enter a campaign name');
-      return;
-    }
-    if (!subject.trim()) {
-      setError('Please enter a subject line');
-      return;
-    }
-    if (!customHtml.trim()) {
-      setError('Please enter HTML content');
+  const handleCreateCampaign = async () => {
+    if (!newCampaign.name || !newCampaign.subject) {
+      toast.error('Campaign name and subject are required');
       return;
     }
 
     setLoading(true);
-    setError('');
+    const { data, error } = await supabase
+      .from('campaigns')
+      .insert({
+        user_id: user?.id,
+        name: newCampaign.name,
+        subject: newCampaign.subject,
+        from_name: newCampaign.from_name || user?.user_metadata?.full_name || 'Mail Wizard',
+        from_email: newCampaign.from_email || user?.email,
+        content: { html: newCampaign.html_body },
+        status: 'draft'
+      })
+      .select()
+      .single();
+
+    setLoading(false);
+
+    if (error) {
+      console.error('Error creating campaign:', error);
+      toast.error('Failed to create campaign');
+    } else {
+      toast.success('Campaign created successfully!');
+      setShowCreateModal(false);
+      setNewCampaign({
+        name: '',
+        subject: '',
+        html_body: '<p>Hello {{firstname}}!</p><p>This is a test email.</p>',
+        from_name: '',
+        from_email: ''
+      });
+      fetchCampaigns();
+    }
+  };
+
+  const handleOpenSendModal = (campaign: Campaign) => {
+    setSelectedCampaign(campaign);
+    setSelectedContacts(new Set());
+    setSelectedSegments(new Set());
+    setSendMode('all');
+    setShowSendModal(true);
+  };
+
+  const handleToggleContact = (contactId: string) => {
+    const newSelected = new Set(selectedContacts);
+    if (newSelected.has(contactId)) {
+      newSelected.delete(contactId);
+    } else {
+      newSelected.add(contactId);
+    }
+    setSelectedContacts(newSelected);
+  };
+
+  const handleToggleSegment = (segmentId: string) => {
+    const newSelected = new Set(selectedSegments);
+    if (newSelected.has(segmentId)) {
+      newSelected.delete(segmentId);
+    } else {
+      newSelected.add(segmentId);
+    }
+    setSelectedSegments(newSelected);
+  };
+
+  const handleSelectAllContacts = () => {
+    if (selectedContacts.size === contacts.length) {
+      setSelectedContacts(new Set());
+    } else {
+      setSelectedContacts(new Set(contacts.map(c => c.id)));
+    }
+  };
+
+  const getRecipientList = async (): Promise<Contact[]> => {
+    if (sendMode === 'all') {
+      return contacts;
+    }
+
+    if (sendMode === 'contacts') {
+      return contacts.filter(c => selectedContacts.has(c.id));
+    }
+
+    if (sendMode === 'groups') {
+      // Fetch contacts from selected segments
+      const segmentIds = Array.from(selectedSegments);
+      if (segmentIds.length === 0) {
+        return [];
+      }
+
+      // Get segment members
+      const { data, error } = await supabase
+        .from('segment_contacts')
+        .select('contact_id')
+        .in('segment_id', segmentIds);
+
+      if (error) {
+        console.error('Error fetching segment contacts:', error);
+        return [];
+      }
+
+      const contactIds = data.map(sc => sc.contact_id);
+      return contacts.filter(c => contactIds.includes(c.id));
+    }
+
+    return [];
+  };
+
+  const handleSendCampaign = async () => {
+    if (!selectedCampaign) return;
+
+    const recipients = await getRecipientList();
+
+    if (recipients.length === 0) {
+      toast.error('No recipients selected');
+      return;
+    }
+
+    const confirmMessage = `Send "${selectedCampaign.name}" to ${recipients.length} recipient(s)?`;
+    if (!confirm(confirmMessage)) return;
+
+    setLoading(true);
+    toast.loading(`Sending to ${recipients.length} recipient(s)...`, { id: 'sending' });
 
     try {
-      // Create draft campaign with custom HTML
-      const { error: insertError } = await supabase
-        .from('campaigns')
-        .insert({
-          user_id: user?.id,
-          name: campaignName,
-          subject: subject,
-          content: {
-            html: customHtml
-          },
-          status: 'draft',
-          from_email: user?.email,
-          from_name: 'Mail Wizard'
-        });
+      const { data, error } = await supabase.functions.invoke('send-email', {
+        body: {
+          campaign_id: selectedCampaign.id,
+          from_email: selectedCampaign.content.from_email || user?.email,
+          from_name: selectedCampaign.content.from_name || user?.user_metadata?.full_name,
+          subject: selectedCampaign.subject,
+          html_body: selectedCampaign.content.html,
+          recipients: recipients.map(contact => ({
+            email: contact.email,
+            contact_id: contact.id,
+            first_name: contact.first_name,
+            last_name: contact.last_name
+          }))
+        }
+      });
 
-      if (insertError) throw insertError;
+      if (error) throw error;
 
-      toast.success('Campaign draft created successfully!');
-      onSuccess();
-      onClose();
-    } catch (err: any) {
-      console.error('Error creating campaign:', err);
-      setError(err.message || 'Failed to create campaign');
+      toast.success(`Campaign sent to ${data.sent} recipient(s)!`, { id: 'sending' });
+      setShowSendModal(false);
+      fetchCampaigns();
+    } catch (error: any) {
+      console.error('Error sending campaign:', error);
+      toast.error(error.message || 'Failed to send campaign', { id: 'sending' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="border-b border-black">
-          <div className="p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-serif font-bold">Create New Campaign</h2>
-              <button onClick={onClose} className="text-gray-500 hover:text-black">
-                ✕
+    <div className="p-8">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold">Campaigns</h1>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded-full hover:bg-yellow-500"
+        >
+          + Create Campaign
+        </button>
+      </div>
+
+      {/* Campaigns List */}
+      <div className="grid gap-4">
+        {campaigns.map((campaign) => (
+          <div key={campaign.id} className="border rounded-lg p-6 bg-white">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-xl font-bold">{campaign.name}</h3>
+                <p className="text-gray-600">{campaign.subject}</p>
+                <span className={`inline-block mt-2 px-3 py-1 rounded-full text-sm ${
+                  campaign.status === 'sent' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {campaign.status}
+                </span>
+              </div>
+              {campaign.status === 'draft' && (
+                <button
+                  onClick={() => handleOpenSendModal(campaign)}
+                  className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded-full hover:bg-yellow-500"
+                >
+                  Send Campaign
+                </button>
+              )}
+            </div>
+
+            {campaign.status === 'sent' && (
+              <div className="grid grid-cols-4 gap-4 mt-4 pt-4 border-t">
+                <div>
+                  <p className="text-sm text-gray-600">Sent</p>
+                  <p className="text-2xl font-bold">{campaign.recipients_count || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Opens</p>
+                  <p className="text-2xl font-bold">{campaign.opens || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Clicks</p>
+                  <p className="text-2xl font-bold">{campaign.clicks || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Open Rate</p>
+                  <p className="text-2xl font-bold">
+                    {campaign.recipients_count > 0 
+                      ? Math.round((campaign.opens / campaign.recipients_count) * 100) 
+                      : 0}%
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Create Campaign Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-6">Create New Campaign</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Campaign Name</label>
+                <input
+                  type="text"
+                  value={newCampaign.name}
+                  onChange={(e) => setNewCampaign({...newCampaign, name: e.target.value})}
+                  className="w-full px-4 py-2 border rounded-lg"
+                  placeholder="My Campaign"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Subject Line</label>
+                <input
+                  type="text"
+                  value={newCampaign.subject}
+                  onChange={(e) => setNewCampaign({...newCampaign, subject: e.target.value})}
+                  className="w-full px-4 py-2 border rounded-lg"
+                  placeholder="Hello {{firstname}}!"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Email Body (HTML)</label>
+                <textarea
+                  value={newCampaign.html_body}
+                  onChange={(e) => setNewCampaign({...newCampaign, html_body: e.target.value})}
+                  className="w-full px-4 py-2 border rounded-lg font-mono text-sm"
+                  rows={10}
+                  placeholder="<p>Your email content here</p>"
+                />
+              </div>
+
+              <div className="flex gap-4 justify-end mt-6">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-6 py-2 border rounded-full hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateCampaign}
+                  disabled={loading}
+                  className="px-6 py-2 bg-yellow-400 text-black font-semibold rounded-full hover:bg-yellow-500 disabled:opacity-50"
+                >
+                  {loading ? 'Creating...' : 'Create Campaign'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Campaign Modal with Group/Contact Selection */}
+      {showSendModal && selectedCampaign && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-6">Send Campaign: {selectedCampaign.name}</h2>
+            
+            {/* Send Mode Selection */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-3">Send To:</label>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setSendMode('all')}
+                  className={`px-4 py-2 rounded-full font-medium ${
+                    sendMode === 'all' 
+                      ? 'bg-yellow-400 text-black' 
+                      : 'bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  All Contacts ({contacts.length})
+                </button>
+                <button
+                  onClick={() => setSendMode('groups')}
+                  className={`px-4 py-2 rounded-full font-medium ${
+                    sendMode === 'groups' 
+                      ? 'bg-yellow-400 text-black' 
+                      : 'bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  Select Groups
+                </button>
+                <button
+                  onClick={() => setSendMode('contacts')}
+                  className={`px-4 py-2 rounded-full font-medium ${
+                    sendMode === 'contacts' 
+                      ? 'bg-yellow-400 text-black' 
+                      : 'bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  Select Contacts
+                </button>
+              </div>
+            </div>
+
+            {/* Group Selection */}
+            {sendMode === 'groups' && (
+              <div className="mb-6">
+                <h3 className="font-medium mb-3">Select Groups ({selectedSegments.size} selected)</h3>
+                <div className="border rounded-lg max-h-60 overflow-y-auto">
+                  {segments.length === 0 ? (
+                    <p className="text-gray-500 p-4 text-center">No groups available</p>
+                  ) : (
+                    segments.map((segment) => (
+                      <label key={segment.id} className="flex items-center p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedSegments.has(segment.id)}
+                          onChange={() => handleToggleSegment(segment.id)}
+                          className="mr-3"
+                        />
+                        <div>
+                          <p className="font-medium">{segment.name}</p>
+                          {segment.description && (
+                            <p className="text-sm text-gray-600">{segment.description}</p>
+                          )}
+                        </div>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Contact Selection */}
+            {sendMode === 'contacts' && (
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-medium">Select Contacts ({selectedContacts.size} selected)</h3>
+                  <button
+                    onClick={handleSelectAllContacts}
+                    className="text-sm text-yellow-600 hover:text-yellow-700 font-medium"
+                  >
+                    {selectedContacts.size === contacts.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+                <div className="border rounded-lg max-h-60 overflow-y-auto">
+                  {contacts.map((contact) => (
+                    <label key={contact.id} className="flex items-center p-3 hover:bg-gray-50 cursor-pointer border-b last:border-b-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedContacts.has(contact.id)}
+                        onChange={() => handleToggleContact(contact.id)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <p className="font-medium">
+                          {contact.first_name} {contact.last_name}
+                        </p>
+                        <p className="text-sm text-gray-600">{contact.email}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-4 justify-end pt-4 border-t">
+              <button
+                onClick={() => setShowSendModal(false)}
+                className="px-6 py-2 border rounded-full hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendCampaign}
+                disabled={loading}
+                className="px-6 py-2 bg-yellow-400 text-black font-semibold rounded-full hover:bg-yellow-500 disabled:opacity-50"
+              >
+                {loading ? 'Sending...' : 'Send Campaign'}
               </button>
             </div>
           </div>
         </div>
-
-        {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded mb-4">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-6">
-            {/* Campaign Name */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Campaign Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={campaignName}
-                onChange={(e) => setCampaignName(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#57377d] focus:border-transparent"
-                placeholder="e.g., Summer Newsletter 2025"
-              />
-            </div>
-
-            {/* Subject Line */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                Subject Line <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#57377d] focus:border-transparent"
-                placeholder="Enter email subject line"
-              />
-            </div>
-
-            {/* Content Choice */}
-            <div>
-              <label className="block text-sm font-medium mb-3">
-                Email Content <span className="text-red-500">*</span>
-              </label>
-              
-              <div className="space-y-3">
-                {/* Template Option */}
-                <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-[#f3ba42]">
-                  <input
-                    type="radio"
-                    name="contentChoice"
-                    value="template"
-                    checked={contentChoice === 'template'}
-                    onChange={(e) => setContentChoice(e.target.value as 'template')}
-                    className="mt-1 mr-3"
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold mb-1">Choose from Available Templates</div>
-                    <div className="text-sm text-gray-600">
-                      Browse our professionally designed templates and customize them to fit your brand.
-                    </div>
-                  </div>
-                </label>
-
-                {/* Custom HTML Option */}
-                <label className="flex items-start p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-[#f3ba42]">
-                  <input
-                    type="radio"
-                    name="contentChoice"
-                    value="custom"
-                    checked={contentChoice === 'custom'}
-                    onChange={(e) => setContentChoice(e.target.value as 'custom')}
-                    className="mt-1 mr-3"
-                  />
-                  <div className="flex-1">
-                    <div className="font-semibold mb-1">Enter Custom HTML</div>
-                    <div className="text-sm text-gray-600">
-                      Paste your own HTML code for complete design control.
-                    </div>
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Custom HTML Textarea (conditional) */}
-            {contentChoice === 'custom' && (
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  HTML Content <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={customHtml}
-                  onChange={(e) => setCustomHtml(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#57377d] focus:border-transparent font-mono text-sm"
-                  rows={12}
-                  placeholder="Paste your HTML code here..."
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Paste complete HTML including &lt;html&gt;, &lt;head&gt;, and &lt;body&gt; tags.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-black p-6 flex items-center justify-between bg-gray-50">
-          <Button variant="tertiary" onClick={onClose}>
-            Cancel
-          </Button>
-          
-          {contentChoice === 'template' ? (
-            <Button 
-              variant="primary" 
-              onClick={handleBrowseTemplates}
-            >
-              Browse Templates →
-            </Button>
-          ) : (
-            <Button
-              variant="primary"
-              onClick={handleCreateWithCustomHtml}
-              loading={loading}
-              disabled={loading}
-            >
-              Create Campaign Draft
-            </Button>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
-};
+}
