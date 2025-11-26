@@ -1,8 +1,17 @@
+/**
+ * Signup Page
+ * 
+ * User registration page with automatic login after account creation.
+ * 
+ * FIX APPLIED: Removed manual success handling - AuthContext handles redirect
+ */
+
 import { useState } from 'react';
 import { Mail } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
 
 export const SignupPage = () => {
   const [fullName, setFullName] = useState('');
@@ -17,6 +26,19 @@ export const SignupPage = () => {
     setError('');
     setLoading(true);
 
+    // Validate inputs
+    if (!fullName.trim()) {
+      setError('Please enter your full name');
+      setLoading(false);
+      return;
+    }
+
+    if (!email.trim()) {
+      setError('Please enter your email');
+      setLoading(false);
+      return;
+    }
+
     if (password.length < 6) {
       setError('Password must be at least 6 characters');
       setLoading(false);
@@ -24,7 +46,9 @@ export const SignupPage = () => {
     }
 
     try {
+      // signUp will automatically log in and redirect to dashboard
       await signUp(email, password, fullName);
+      // No need for manual success handling - AuthContext handles it
     } catch (err: any) {
       setError(err.message || 'Failed to sign up');
     } finally {
@@ -59,6 +83,7 @@ export const SignupPage = () => {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
+              disabled={loading}
             />
 
             <Input
@@ -68,6 +93,7 @@ export const SignupPage = () => {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              disabled={loading}
             />
 
             <Input
@@ -77,6 +103,7 @@ export const SignupPage = () => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={loading}
             />
 
             <Button
@@ -87,16 +114,29 @@ export const SignupPage = () => {
               loading={loading}
               disabled={loading}
             >
-              Create Account
+              {loading ? 'Creating Account...' : 'Create Account'}
             </Button>
           </form>
 
           <div className="mt-6 text-center text-sm">
             <span className="text-gray-600">Already have an account? </span>
-            <a href="/login" className="text-gold font-semibold hover:underline">
+            <Link to="/login" className="text-gold hover:text-yellow-600 font-medium">
               Sign in
-            </a>
+            </Link>
           </div>
+        </div>
+
+        <div className="mt-6 text-center text-xs text-gray-500">
+          <p>
+            By signing up, you agree to our{' '}
+            <a href="#" className="text-gold hover:underline">
+              Terms of Service
+            </a>{' '}
+            and{' '}
+            <a href="#" className="text-gold hover:underline">
+              Privacy Policy
+            </a>
+          </p>
         </div>
       </div>
     </div>
