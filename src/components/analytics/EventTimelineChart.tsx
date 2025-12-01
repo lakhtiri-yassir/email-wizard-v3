@@ -21,7 +21,7 @@ import { BarChart3 } from 'lucide-react';
  */
 interface EmailEvent {
   id: string;
-  occurred_at: string;
+  timestamp: string;
   event_type: string;
 }
 
@@ -133,7 +133,7 @@ export const EventTimelineChart = ({ events, loading, timeRange }: EventTimeline
 
   // Aggregate event counts
   events.forEach(event => {
-    const dateKey = new Date(event.occurred_at).toISOString().split('T')[0];
+    const dateKey = new Date(event.timestamp).toISOString().split('T')[0];
     const dayData = dailyData.get(dateKey);
 
     if (dayData) {

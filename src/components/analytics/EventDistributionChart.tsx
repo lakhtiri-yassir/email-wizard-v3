@@ -17,7 +17,7 @@ interface EventStats {
   open: number;
   click: number;
   bounce: number;
-  complaint: number;
+  spam: number;
   unsubscribe: number;
 }
 
@@ -39,7 +39,7 @@ const EVENT_COLORS = {
   open: '#57377d',        // purple
   click: '#f59e0b',       // amber
   bounce: '#ef4444',      // red
-  complaint: '#f97316',   // orange
+  spam: '#f97316',        // orange
   unsubscribe: '#6b7280'  // gray
 };
 
@@ -109,7 +109,7 @@ export const EventDistributionChart = ({ data, loading }: EventDistributionChart
     { name: 'Opens', value: data.open, color: EVENT_COLORS.open },
     { name: 'Clicks', value: data.click, color: EVENT_COLORS.click },
     { name: 'Bounces', value: data.bounce, color: EVENT_COLORS.bounce },
-    { name: 'Complaints', value: data.complaint, color: EVENT_COLORS.complaint },
+    { name: 'Spam Reports', value: data.spam, color: EVENT_COLORS.spam },
     { name: 'Unsubscribes', value: data.unsubscribe, color: EVENT_COLORS.unsubscribe }
   ].filter(item => item.value > 0); // Only show non-zero values
 

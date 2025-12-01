@@ -49,9 +49,8 @@ interface EmailEvent {
   contact_id: string | null;
   email: string;
   event_type: string;
-  event_data: any;
-  url: string | null;
-  occurred_at: string;
+  timestamp: string;
+  metadata: any;
   campaign_name?: string;
 }
 
@@ -65,7 +64,7 @@ interface EventStats {
   open: number;
   click: number;
   bounce: number;
-  complaint: number;
+  spam: number;
   unsubscribe: number;
 }
 
@@ -83,7 +82,7 @@ export const Analytics = () => {
     open: 0,
     click: 0,
     bounce: 0,
-    complaint: 0,
+    spam: 0,
     unsubscribe: 0
   });
   
@@ -142,33 +141,39 @@ export const Analytics = () => {
       }
 
       // Fetch events for user's campaigns
-      // Note: We filter by date range in JavaScript for better compatibility
       let query = supabase
         .from('email_events')
         .select('*')
         .in('campaign_id', campaignIds)
-        .order('occurred_at', { ascending: false })
-        .limit(5000); // Increased limit to get more data
-
-      // Apply event type filter
-      if (selectedEventType !== 'all') {
-        query = query.eq('event_type', selectedEventType);
-      }
-
-      // Apply campaign filter
-      if (selectedCampaign !== 'all') {
-        query = query.eq('campaign_id', selectedCampaign);
-      }
+        .order('timestamp', { ascending: false })
+        .limit(5000); // Fetch more to allow client-side filtering
 
       const { data: eventsData, error: eventsError } = await query;
 
       if (eventsError) throw eventsError;
 
-      // Filter by date range in JavaScript
-      const filteredEvents = eventsData?.filter(event => {
-        const eventDate = new Date(event.occurred_at);
+      // Filter by date range, event type, and campaign in JavaScript
+      let filteredEvents = eventsData || [];
+
+      // Apply date range filter
+      filteredEvents = filteredEvents.filter(event => {
+        const eventDate = new Date(event.timestamp);
         return eventDate >= startDate && eventDate <= endDate;
-      }) || [];
+      });
+
+      // Apply event type filter
+      if (selectedEventType !== 'all') {
+        filteredEvents = filteredEvents.filter(event => 
+          event.event_type === selectedEventType
+        );
+      }
+
+      // Apply campaign filter
+      if (selectedCampaign !== 'all') {
+        filteredEvents = filteredEvents.filter(event => 
+          event.campaign_id === selectedCampaign
+        );
+      }
 
       // Limit to most recent 1000 after filtering
       const limitedEvents = filteredEvents.slice(0, 1000);
@@ -188,7 +193,7 @@ export const Analytics = () => {
         open: 0,
         click: 0,
         bounce: 0,
-        complaint: 0,
+        spam: 0,
         unsubscribe: 0
       };
 
@@ -222,11 +227,11 @@ export const Analytics = () => {
 
     const csvHeaders = ['Date', 'Campaign', 'Email', 'Event Type', 'URL'];
     const csvRows = events.map(event => [
-      new Date(event.occurred_at).toLocaleString(),
+      new Date(event.timestamp).toLocaleString(),
       event.campaign_name || 'N/A',
       event.email,
       event.event_type,
-      event.url || 'N/A'
+      event.metadata?.url || 'N/A'
     ]);
 
     const csvContent = [
@@ -285,8 +290,8 @@ export const Analytics = () => {
       bgColor: 'bg-red-50'
     },
     {
-      name: 'Complaints',
-      value: eventStats.complaint.toLocaleString(),
+      name: 'Spam Reports',
+      value: eventStats.spam.toLocaleString(),
       icon: AlertCircle,
       color: 'text-orange-600',
       bgColor: 'bg-orange-50'
@@ -302,6 +307,7 @@ export const Analytics = () => {
 
   /**
    * EVENT TYPE OPTIONS
+   * Based on database CHECK constraint: 'sent', 'delivered', 'open', 'click', 'bounce', 'spam', 'unsubscribe'
    */
   const eventTypeOptions = [
     { value: 'all', label: 'All Events' },
@@ -310,7 +316,7 @@ export const Analytics = () => {
     { value: 'open', label: 'Opens' },
     { value: 'click', label: 'Clicks' },
     { value: 'bounce', label: 'Bounces' },
-    { value: 'complaint', label: 'Complaints' },
+    { value: 'spam', label: 'Spam Reports' },
     { value: 'unsubscribe', label: 'Unsubscribes' }
   ];
 
@@ -488,7 +494,7 @@ export const Analytics = () => {
                   {events.map((event) => (
                     <tr key={event.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4 text-sm text-gray-600">
-                        {new Date(event.occurred_at).toLocaleDateString('en-US', {
+                        {new Date(event.timestamp).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           hour: '2-digit',
@@ -502,7 +508,7 @@ export const Analytics = () => {
                           event.event_type === 'open' ? 'bg-purple/10 text-purple' :
                           event.event_type === 'click' ? 'bg-gold/10 text-gold' :
                           event.event_type === 'bounce' ? 'bg-red-100 text-red-600' :
-                          event.event_type === 'complaint' ? 'bg-orange-100 text-orange-600' :
+                          event.event_type === 'spam' ? 'bg-orange-100 text-orange-600' :
                           event.event_type === 'unsubscribe' ? 'bg-gray-100 text-gray-600' :
                           event.event_type === 'delivered' ? 'bg-green-100 text-green-600' :
                           'bg-gray-100 text-gray-600'
@@ -511,7 +517,7 @@ export const Analytics = () => {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-sm text-gray-600 truncate max-w-xs">
-                        {event.url || '-'}
+                        {event.metadata?.url || '-'}
                       </td>
                     </tr>
                   ))}
