@@ -141,15 +141,14 @@ export const Analytics = () => {
         return;
       }
 
-      // Build query
+      // Fetch events for user's campaigns
+      // Note: We filter by date range in JavaScript for better compatibility
       let query = supabase
         .from('email_events')
         .select('*')
         .in('campaign_id', campaignIds)
-        .gte('occurred_at', startDate.toISOString())
-        .lte('occurred_at', endDate.toISOString())
         .order('occurred_at', { ascending: false })
-        .limit(1000);
+        .limit(5000); // Increased limit to get more data
 
       // Apply event type filter
       if (selectedEventType !== 'all') {
@@ -165,15 +164,24 @@ export const Analytics = () => {
 
       if (eventsError) throw eventsError;
 
+      // Filter by date range in JavaScript
+      const filteredEvents = eventsData?.filter(event => {
+        const eventDate = new Date(event.occurred_at);
+        return eventDate >= startDate && eventDate <= endDate;
+      }) || [];
+
+      // Limit to most recent 1000 after filtering
+      const limitedEvents = filteredEvents.slice(0, 1000);
+
       // Enrich events with campaign names
-      const enrichedEvents = eventsData?.map(event => ({
+      const enrichedEvents = limitedEvents.map(event => ({
         ...event,
         campaign_name: userCampaigns?.find(c => c.id === event.campaign_id)?.name || 'Unknown Campaign'
-      })) || [];
+      }));
 
       setEvents(enrichedEvents);
 
-      // Calculate event statistics
+      // Calculate event statistics from filtered events
       const stats: EventStats = {
         sent: 0,
         delivered: 0,
@@ -184,7 +192,7 @@ export const Analytics = () => {
         unsubscribe: 0
       };
 
-      eventsData?.forEach(event => {
+      limitedEvents.forEach(event => {
         const type = event.event_type.toLowerCase();
         if (type in stats) {
           stats[type as keyof EventStats]++;
