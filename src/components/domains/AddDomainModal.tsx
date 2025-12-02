@@ -17,13 +17,21 @@
  * - onClose: Close handler
  * - onDomainAdded: Success callback with domain data
  * 
+ * Design System Compliance:
+ * - Uses Button component with proper variants
+ * - Uses Input component for form fields
+ * - Uses .card class for modal container
+ * - Uses design system colors
+ * - No custom CSS classes or inline styles
+ * 
  * ============================================================================
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { X, Globe, AlertCircle } from 'lucide-react';
-import domainService, { Domain } from '../../lib/services/domainService';
-import Button from '../ui/Button';
+import domainService, { Domain } from '../../lib/domainService';
+import { Button } from '../ui/Button';
+import { Input } from '../ui/Input';
 
 interface AddDomainModalProps {
   isOpen: boolean;
@@ -74,14 +82,14 @@ export default function AddDomainModal({
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         onClose();
-      } else if (e.key === 'Enter' && !loading) {
+      } else if (e.key === 'Enter' && !loading && !validationError && domain.trim()) {
         handleSubmit();
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, loading, domain]);
+  }, [isOpen, loading, domain, validationError]);
 
   /**
    * Validates domain as user types
@@ -103,31 +111,25 @@ export default function AddDomainModal({
    * Handles form submission
    */
   async function handleSubmit() {
-    // Validate input
-    if (!domain.trim()) {
-      setError('Please enter a domain name');
-      return;
-    }
-
+    // Validate before submission
     const validation = domainService.validateDomainFormat(domain);
     if (!validation.valid) {
-      setError(validation.error || 'Invalid domain format');
+      setValidationError(validation.error || 'Invalid domain format');
       return;
     }
 
-    // Submit
     setLoading(true);
     setError(null);
 
     try {
-      const result = await domainService.addDomain(domain.trim());
-
+      const result = await domainService.addDomain(domain);
+      
       if (result.success && result.domain) {
-        // Success - callback and close
         onDomainAdded(result.domain);
+        // Reset form
         setDomain('');
+        setValidationError(null);
       } else {
-        // Error from API
         setError(result.error || 'Failed to add domain. Please try again.');
       }
     } catch (err: any) {
@@ -181,22 +183,15 @@ export default function AddDomainModal({
           <div className="space-y-4">
             {/* Domain Input */}
             <div>
-              <label htmlFor="domain" className="block text-sm font-medium text-gray-700 mb-2">
-                Domain Name
-              </label>
-              <input
+              <Input
                 ref={inputRef}
-                id="domain"
                 type="text"
+                label="Domain Name"
                 placeholder="example.com"
                 value={domain}
                 onChange={(e) => handleDomainChange(e.target.value)}
                 disabled={loading}
-                className={`w-full px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-gold transition-colors ${
-                  validationError || error
-                    ? 'border-red-300 focus:ring-red-500'
-                    : 'border-gray-300 focus:ring-gold'
-                }`}
+                icon={Globe}
               />
               
               {/* Validation Error (real-time) */}

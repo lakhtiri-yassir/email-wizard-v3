@@ -10,7 +10,7 @@
  * - Display records in easy-to-copy format
  * - Copy to clipboard functionality
  * - Verification trigger
- * - Provider-specific help (future: Phase 4)
+ * - Provider-specific help (STEP 11: Will add provider integration)
  * 
  * Props:
  * - isOpen: Modal visibility
@@ -18,14 +18,26 @@
  * - domainId: Domain ID to show instructions for
  * - onVerify: Verification handler
  * 
+ * Design System Compliance:
+ * - Uses Button component with proper variants
+ * - Uses .card class for modal container
+ * - Uses design system colors
+ * - No custom CSS classes or inline styles
+ * 
  * ============================================================================
  */
 
 import { useState, useEffect } from 'react';
-import { X, Copy, CheckCircle, AlertCircle, RefreshCw, Eye } from 'lucide-react';
-import domainService, { DNSInstructions } from '../../lib/services/domainService';
-import Button from '../ui/Button';
-import DNSRecordRow from './DNSRecordRow';
+import { X, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import domainService, { DNSInstructions } from '../../lib/domainService';
+import { Button } from '../ui/Button';
+import DNSProviderSelector, { DNSProvider } from './DNSProviderSelector';
+import CloudflareGuide from './guides/CloudflareGuide';
+import GoDaddyGuide from './guides/GoDaddyGuide';
+import NamecheapGuide from './guides/NamecheapGuide';
+import GoogleDomainsGuide from './guides/GoogleDomainsGuide';
+import Route53Guide from './guides/Route53Guide';
+import GenericGuide from './guides/GenericGuide';
 
 interface DNSInstructionsModalProps {
   isOpen: boolean;
@@ -48,6 +60,7 @@ export default function DNSInstructionsModal({
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<DNSProvider>('generic');
 
   /**
    * Load DNS instructions when modal opens or domainId changes
@@ -98,6 +111,29 @@ export default function DNSInstructionsModal({
     }
   }
 
+  /**
+   * Renders the appropriate provider guide based on selection
+   */
+  function renderProviderGuide() {
+    if (!instructions) return null;
+    
+    switch (selectedProvider) {
+      case 'cloudflare':
+        return <CloudflareGuide instructions={instructions} />;
+      case 'godaddy':
+        return <GoDaddyGuide instructions={instructions} />;
+      case 'namecheap':
+        return <NamecheapGuide instructions={instructions} />;
+      case 'google':
+        return <GoogleDomainsGuide instructions={instructions} />;
+      case 'route53':
+        return <Route53Guide instructions={instructions} />;
+      case 'generic':
+      default:
+        return <GenericGuide instructions={instructions} />;
+    }
+  }
+
   // Don't render if not open
   if (!isOpen) return null;
 
@@ -121,7 +157,7 @@ export default function DNSInstructionsModal({
               <h2 className="text-xl font-serif font-bold mb-1">DNS Configuration</h2>
               {instructions && (
                 <p className="text-sm text-gray-600">
-                  Configure DNS records for <span className="font-semibold">{instructions.domain}</span>
+                  Domain: <strong>{instructions.domain}</strong>
                 </p>
               )}
             </div>
@@ -135,133 +171,59 @@ export default function DNSInstructionsModal({
 
           {/* Loading State */}
           {loading && (
-            <div className="text-center py-12">
-              <RefreshCw className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-4" />
-              <p className="text-gray-600">Loading DNS instructions...</p>
+            <div className="flex items-center justify-center py-12">
+              <RefreshCw className="w-8 h-8 text-purple animate-spin" />
             </div>
           )}
 
           {/* Error State */}
           {error && !loading && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-medium text-red-900 mb-1">Error Loading Instructions</h4>
                   <p className="text-sm text-red-700">{error}</p>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={loadInstructions}
-                    className="mt-3"
-                  >
-                    Try Again
-                  </Button>
                 </div>
               </div>
             </div>
           )}
 
           {/* Instructions Content */}
-          {instructions && !loading && (
-            <div className="space-y-6">
-              {/* Status Banner */}
-              {instructions.status === 'verified' ? (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    <div>
-                      <h4 className="font-medium text-green-900">Domain Verified!</h4>
-                      <p className="text-sm text-green-700">
-                        Your domain is ready to use for sending emails.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="font-medium text-blue-900 mb-2">
-                    Add these DNS records to your domain provider
-                  </h4>
-                  <p className="text-sm text-blue-700">
-                    Log into your domain registrar or DNS provider (like Cloudflare, GoDaddy, Namecheap) 
-                    and add the following DNS records.
-                  </p>
-                </div>
-              )}
-
-              {/* DNS Records */}
-              <div className="space-y-4">
-                <h3 className="font-semibold text-gray-900">DNS Records to Add:</h3>
-                {instructions.records.map((record, index) => (
-                  <DNSRecordRow key={index} instruction={record} />
-                ))}
-              </div>
-
-              {/* Important Notes */}
-              {instructions.notes && instructions.notes.length > 0 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  <h4 className="font-medium text-yellow-900 mb-2">Important Notes:</h4>
-                  <ul className="text-sm text-yellow-700 space-y-1">
-                    {instructions.notes.map((note, index) => (
-                      <li key={index}>• {note}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Verification Section */}
-              {instructions.status !== 'verified' && (
-                <div className="border-t border-gray-200 pt-6">
-                  <h4 className="font-semibold text-gray-900 mb-3">After Adding DNS Records:</h4>
-                  <p className="text-sm text-gray-600 mb-4">
-                    DNS changes typically take 5-30 minutes to propagate. Once you've added all the records, 
-                    click the button below to verify your domain.
-                  </p>
-                  <Button
-                    variant="primary"
-                    size="md"
-                    icon={RefreshCw}
-                    onClick={handleVerify}
-                    loading={verifying}
-                    disabled={verifying}
-                  >
-                    Verify Domain Now
-                  </Button>
-                </div>
-              )}
-
-              {/* Troubleshooting */}
-              <details className="border border-gray-200 rounded-lg">
-                <summary className="px-4 py-3 cursor-pointer font-medium text-gray-900 hover:bg-gray-50">
-                  Troubleshooting Tips
-                </summary>
-                <div className="px-4 pb-4 text-sm text-gray-600 space-y-2">
-                  <p><strong>Records not verifying?</strong></p>
-                  <ul className="list-disc list-inside space-y-1 ml-2">
-                    <li>Wait at least 30 minutes after adding records</li>
-                    <li>Check that you copied the exact values (no extra spaces)</li>
-                    <li>Some providers use "@" instead of the root domain name</li>
-                    <li>Make sure the record type (CNAME or TXT) is correct</li>
-                    <li>Try using a TTL of 300 or "Automatic"</li>
-                  </ul>
-                  <p className="mt-3"><strong>Still having issues?</strong></p>
-                  <p>Contact our support team with your domain name for assistance.</p>
-                </div>
-              </details>
-            </div>
+          {!loading && !error && instructions && (
+            <>
+              {/* Provider Selector */}
+              <DNSProviderSelector
+                selectedProvider={selectedProvider}
+                onProviderChange={setSelectedProvider}
+              />
+              
+              {/* Dynamic Provider Guide */}
+              {renderProviderGuide()}
+            </>
           )}
 
           {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={onClose}
-            >
-              Close
-            </Button>
-          </div>
+          {!loading && !error && instructions && (
+            <div className="flex items-center justify-between mt-6 pt-6 border-t border-gray-200">
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={onClose}
+              >
+                Close
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={handleVerify}
+                loading={verifying}
+                icon={CheckCircle}
+              >
+                Verify Domain
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </>

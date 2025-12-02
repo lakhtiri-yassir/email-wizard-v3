@@ -19,14 +19,20 @@
  * - AddDomainModal for adding new domains
  * - DNSInstructionsModal for DNS setup guide
  * 
+ * Design System Compliance:
+ * - Uses Button component with proper variants
+ * - Uses .card class for containers
+ * - Uses design system colors (gold, purple, black, white)
+ * - No custom CSS classes or inline styles
+ * 
  * ============================================================================
  */
 
 import { useState, useEffect } from 'react';
 import { Globe, Plus, AlertCircle, RefreshCw } from 'lucide-react';
-import domainService, { Domain } from '../../../lib/services/domainService';
-import AppLayout from '../../../components/layout/AppLayout';
-import Button from '../../../components/ui/Button';
+import domainService, { Domain } from '../../../lib/domainService';
+import AppLayout from '../../../components/app/AppLayout';
+import { Button } from '../../../components/ui/Button';
 import DomainCard from '../../../components/domains/DomainCard';
 import AddDomainModal from '../../../components/domains/AddDomainModal';
 import DNSInstructionsModal from '../../../components/domains/DNSInstructionsModal';
@@ -146,7 +152,7 @@ export default function Domains() {
       const result = await domainService.deleteDomain(domainId);
       
       if (result.success) {
-        // Remove from state
+        // Remove domain from state
         setDomains(prev => prev.filter(d => d.id !== domainId));
       }
       
@@ -173,31 +179,30 @@ export default function Domains() {
     setSelectedDomainId(null);
   }
 
-  // Get counts for display
-  const verifiedCount = domains.filter(d => d.verification_status === 'verified').length;
-  const pendingCount = domains.filter(d => d.verification_status === 'pending').length;
-  const defaultDomain = domains.find(d => d.is_default);
-
   return (
-    <AppLayout>
-      <div className="max-w-6xl mx-auto">
-        {/* Page Header */}
+    <AppLayout currentPath="/app/settings/domains">
+      <div className="max-w-5xl mx-auto p-6">
+        {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-3xl font-serif font-bold mb-2">Custom Domains</h1>
-              <p className="text-gray-600">
-                Manage your custom sending domains for professional email delivery
-              </p>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-gold/10 flex items-center justify-center">
+                <Globe className="w-6 h-6 text-gold" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-serif font-bold">Custom Domains</h1>
+                <p className="text-gray-600">
+                  Add and verify custom domains for sending emails
+                </p>
+              </div>
             </div>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
               <Button
-                variant="secondary"
+                variant="tertiary"
                 size="md"
                 icon={RefreshCw}
                 onClick={handleRefresh}
                 loading={refreshing}
-                disabled={loading}
               >
                 Refresh
               </Button>
@@ -206,39 +211,23 @@ export default function Domains() {
                 size="md"
                 icon={Plus}
                 onClick={() => setShowAddModal(true)}
-                disabled={loading}
               >
                 Add Domain
               </Button>
             </div>
           </div>
-
-          {/* Stats Bar */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="card p-4">
-              <div className="text-sm text-gray-600 mb-1">Total Domains</div>
-              <div className="text-2xl font-bold">{domains.length}</div>
-            </div>
-            <div className="card p-4">
-              <div className="text-sm text-gray-600 mb-1">Verified</div>
-              <div className="text-2xl font-bold text-green-600">{verifiedCount}</div>
-            </div>
-            <div className="card p-4">
-              <div className="text-sm text-gray-600 mb-1">Pending</div>
-              <div className="text-2xl font-bold text-yellow-600">{pendingCount}</div>
-            </div>
-            <div className="card p-4">
-              <div className="text-sm text-gray-600 mb-1">Default Domain</div>
-              <div className="text-sm font-semibold truncate">
-                {defaultDomain?.domain || 'None'}
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="card bg-red-50 border-red-200 p-4 mb-6">
+        {/* Loading State */}
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="w-8 h-8 text-purple animate-spin" />
+          </div>
+        )}
+
+        {/* Error State */}
+        {!loading && error && (
+          <div className="card bg-red-50 border-red-200 p-6">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
               <div>
@@ -257,19 +246,13 @@ export default function Domains() {
           </div>
         )}
 
-        {/* Loading State */}
-        {loading && (
-          <div className="text-center py-12">
-            <RefreshCw className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading domains...</p>
-          </div>
-        )}
-
         {/* Empty State */}
         {!loading && !error && domains.length === 0 && (
           <div className="card text-center py-12">
-            <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold mb-2">No Custom Domains Yet</h3>
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
+              <Globe className="w-8 h-8 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-serif font-bold mb-2">No Custom Domains Yet</h3>
             <p className="text-gray-600 mb-6 max-w-md mx-auto">
               Add a custom domain to send emails from your own domain name and improve deliverability.
             </p>

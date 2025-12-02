@@ -19,6 +19,12 @@
  * - onDelete: Delete handler
  * - onViewDNS: View DNS instructions handler
  * 
+ * Design System Compliance:
+ * - Uses .card class for container
+ * - Uses Button component with proper variants
+ * - Uses design system colors (gold, purple, red, green)
+ * - No custom CSS classes or inline styles
+ * 
  * ============================================================================
  */
 
@@ -33,10 +39,8 @@ import {
   RefreshCw,
   Globe
 } from 'lucide-react';
-import { Domain } from '../../lib/services/domainService';
-import domainService from '../../lib/services/domainService';
-import Button from '../ui/Button';
-import VerificationStatus from './VerificationStatus';
+import { Domain } from '../../lib/domainService';
+import { Button } from '../ui/Button';
 
 interface DomainCardProps {
   domain: Domain;
@@ -68,17 +72,6 @@ export default function DomainCard({
     setVerifying(true);
     const result = await onVerify(domain.id);
     setVerifying(false);
-
-    // Show toast notification (you can implement toast service)
-    if (result.success) {
-      if (result.domain?.verification_status === 'verified') {
-        console.log('✅ Domain verified successfully!');
-      } else {
-        console.log('⚠️ Verification pending. Check DNS records.');
-      }
-    } else {
-      console.error('❌ Verification failed:', result.error);
-    }
   }
 
   /**
@@ -88,12 +81,6 @@ export default function DomainCard({
     setSettingDefault(true);
     const result = await onSetDefault(domain.id);
     setSettingDefault(false);
-
-    if (result.success) {
-      console.log('✅ Default domain updated');
-    } else {
-      console.error('❌ Failed to set default:', result.error);
-    }
   }
 
   /**
@@ -103,76 +90,127 @@ export default function DomainCard({
     setDeleting(true);
     const result = await onDelete(domain.id);
     setDeleting(false);
-
-    if (result.success) {
-      console.log('✅ Domain deleted');
-    } else if (result.error) {
-      console.error('❌ Failed to delete:', result.error);
-    }
   }
 
-  // Get status details
+  // Status helpers
   const isVerified = domain.verification_status === 'verified';
   const isPending = domain.verification_status === 'pending';
   const isFailed = domain.verification_status === 'failed';
-  const canRetry = domainService.canRetryVerification(
-    domain.verification_status,
-    domain.created_at
-  );
+
+  /**
+   * Renders status badge with appropriate styling
+   */
+  function renderStatusBadge() {
+    if (isVerified) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-gold text-black">
+          <CheckCircle size={14} />
+          Verified
+        </span>
+      );
+    } else if (isPending) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-gray-200 text-gray-700">
+          <Clock size={14} />
+          Pending
+        </span>
+      );
+    } else if (isFailed) {
+      return (
+        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-red-50 text-red-700">
+          <XCircle size={14} />
+          Failed
+        </span>
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Formats date for display
+   */
+  function formatDate(dateString: string | null): string {
+    if (!dateString) return 'Never';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }
+
+  /**
+   * Gets time since last action
+   */
+  function getTimeSince(dateString: string | null): string {
+    if (!dateString) return 'Never';
+    
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins} minutes ago`;
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    return `${diffDays} days ago`;
+  }
 
   return (
-    <div className="card p-6 hover:shadow-lg transition-shadow">
+    <div className="card">
       <div className="flex items-start justify-between gap-4">
         {/* Domain Info */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1">
           <div className="flex items-center gap-3 mb-2">
-            <Globe className="w-5 h-5 text-gray-400 flex-shrink-0" />
-            <h3 className="text-lg font-semibold truncate">{domain.domain}</h3>
+            {/* Domain Icon */}
+            <div className="w-10 h-10 rounded-full bg-purple/10 flex items-center justify-center flex-shrink-0">
+              <Globe className="w-5 h-5 text-purple" />
+            </div>
             
-            {/* Default Badge */}
-            {domain.is_default && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gold/10 text-gold rounded-full text-xs font-medium">
-                <Star className="w-3 h-3 fill-current" />
-                Default
-              </span>
-            )}
+            {/* Domain Name & Badges */}
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-serif font-bold">{domain.domain}</h3>
+                {renderStatusBadge()}
+                {domain.is_default && (
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium bg-purple/10 text-purple">
+                    <Star size={14} />
+                    Default
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* Status */}
-          <div className="mb-4">
-            <VerificationStatus
-              status={domain.verification_status}
-              lastVerified={domain.last_verified_at}
-            />
-          </div>
-
-          {/* Metadata */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-600">
+          {/* Timestamps */}
+          <div className="text-sm text-gray-600 space-y-1 ml-13">
             <div>
-              <span className="font-medium">Added:</span>{' '}
-              {new Date(domain.created_at).toLocaleDateString()}
+              <span className="font-medium">Created:</span> {formatDate(domain.created_at)}
             </div>
             {domain.verified_at && (
               <div>
-                <span className="font-medium">Verified:</span>{' '}
-                {new Date(domain.verified_at).toLocaleDateString()}
+                <span className="font-medium">Verified:</span> {formatDate(domain.verified_at)}
               </div>
             )}
             {domain.last_verified_at && (
               <div>
-                <span className="font-medium">Last Check:</span>{' '}
-                {domainService.getTimeSince(domain.last_verified_at)}
+                <span className="font-medium">Last Check:</span> {getTimeSince(domain.last_verified_at)}
               </div>
             )}
           </div>
 
           {/* Status Message */}
-          <p className="text-sm text-gray-600 mt-3">
-            {domainService.getStatusMessage(
-              domain.verification_status,
-              domain.last_verified_at
-            )}
-          </p>
+          {isPending && (
+            <p className="text-sm text-gray-600 mt-3">
+              Waiting for DNS records to be verified. This usually takes 5-30 minutes after adding the records.
+            </p>
+          )}
+          {isFailed && (
+            <p className="text-sm text-red-600 mt-3">
+              Verification failed. Please check your DNS records and try again.
+            </p>
+          )}
         </div>
 
         {/* Actions */}
@@ -187,21 +225,20 @@ export default function DomainCard({
             View DNS
           </Button>
 
-          {/* Verify Button */}
-          {!isVerified && canRetry && (
+          {/* Verify Button (only for pending/failed) */}
+          {!isVerified && (
             <Button
-              variant={isPending ? 'secondary' : 'primary'}
+              variant={isPending ? "secondary" : "primary"}
               size="sm"
               icon={RefreshCw}
               onClick={handleVerify}
               loading={verifying}
-              disabled={verifying}
             >
               {isPending ? 'Check Status' : 'Retry Verify'}
             </Button>
           )}
 
-          {/* Set Default Button */}
+          {/* Set Default Button (only for verified, non-default domains) */}
           {isVerified && !domain.is_default && (
             <Button
               variant="secondary"
@@ -209,7 +246,6 @@ export default function DomainCard({
               icon={Star}
               onClick={handleSetDefault}
               loading={settingDefault}
-              disabled={settingDefault}
             >
               Set Default
             </Button>
@@ -217,12 +253,12 @@ export default function DomainCard({
 
           {/* Delete Button */}
           <Button
-            variant="danger"
+            variant="destructive"
             size="sm"
             icon={Trash2}
             onClick={handleDelete}
             loading={deleting}
-            disabled={deleting || domain.is_default}
+            disabled={domain.is_default}
             title={domain.is_default ? 'Cannot delete default domain' : 'Delete domain'}
           >
             Delete
@@ -230,13 +266,14 @@ export default function DomainCard({
         </div>
       </div>
 
-      {/* DNS Records Summary (for pending/failed) */}
+      {/* DNS Records Summary (for non-verified domains) */}
       {!isVerified && domain.dns_records && (
         <div className="mt-4 pt-4 border-t border-gray-200">
           <h4 className="text-sm font-medium text-gray-700 mb-2">
             DNS Records Status:
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {/* Mail CNAME */}
             {domain.dns_records.mail_cname && (
               <div className="flex items-center gap-2 text-sm">
                 {domain.dns_records.mail_cname.valid ? (
@@ -244,33 +281,51 @@ export default function DomainCard({
                 ) : (
                   <XCircle className="w-4 h-4 text-red-600" />
                 )}
-                <span>Mail CNAME</span>
+                <span className={domain.dns_records.mail_cname.valid ? 'text-green-700' : 'text-red-700'}>
+                  Mail CNAME
+                </span>
               </div>
             )}
-            <div className="flex items-center gap-2 text-sm">
-              {domain.dns_records.dkim1.valid ? (
-                <CheckCircle className="w-4 h-4 text-green-600" />
-              ) : (
-                <XCircle className="w-4 h-4 text-red-600" />
-              )}
-              <span>DKIM 1</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm">
-              {domain.dns_records.dkim2.valid ? (
-                <CheckCircle className="w-4 h-4 text-green-600" />
-              ) : (
-                <XCircle className="w-4 h-4 text-red-600" />
-              )}
-              <span>DKIM 2</span>
-            </div>
+            
+            {/* DKIM 1 */}
+            {domain.dns_records.dkim1 && (
+              <div className="flex items-center gap-2 text-sm">
+                {domain.dns_records.dkim1.valid ? (
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-600" />
+                )}
+                <span className={domain.dns_records.dkim1.valid ? 'text-green-700' : 'text-red-700'}>
+                  DKIM 1
+                </span>
+              </div>
+            )}
+            
+            {/* DKIM 2 */}
+            {domain.dns_records.dkim2 && (
+              <div className="flex items-center gap-2 text-sm">
+                {domain.dns_records.dkim2.valid ? (
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                ) : (
+                  <XCircle className="w-4 h-4 text-red-600" />
+                )}
+                <span className={domain.dns_records.dkim2.valid ? 'text-green-700' : 'text-red-700'}>
+                  DKIM 2
+                </span>
+              </div>
+            )}
+            
+            {/* SPF */}
             {domain.dns_records.spf && (
               <div className="flex items-center gap-2 text-sm">
                 {domain.dns_records.spf.valid ? (
                   <CheckCircle className="w-4 h-4 text-green-600" />
                 ) : (
-                  <Clock className="w-4 h-4 text-gray-400" />
+                  <XCircle className="w-4 h-4 text-red-600" />
                 )}
-                <span>SPF (Optional)</span>
+                <span className={domain.dns_records.spf.valid ? 'text-green-700' : 'text-red-700'}>
+                  SPF
+                </span>
               </div>
             )}
           </div>
