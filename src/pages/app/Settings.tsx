@@ -1,5 +1,6 @@
 import { User, Globe, CreditCard, Key, Bell, Shield } from 'lucide-react';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom'; // ADD THIS IMPORT
 import { AppLayout } from '../../components/app/AppLayout';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -17,11 +18,21 @@ const tabs = [
 
 export const Settings = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate(); // ADD THIS
   const [activeTab, setActiveTab] = useState('profile');
   const { createCheckoutSession, loading: checkoutLoading } = useStripeCheckout();
 
   const handleUpgrade = (plan: 'pro' | 'pro_plus') => {
     createCheckoutSession(plan);
+  };
+
+  // ADD THIS FUNCTION
+  const handleTabClick = (tabId: string) => {
+    if (tabId === 'domains') {
+      navigate('/app/settings/domains');
+    } else {
+      setActiveTab(tabId);
+    }
   };
 
   return (
@@ -40,7 +51,7 @@ export const Settings = () => {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => handleTabClick(tab.id)} {/* CHANGE THIS */}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-250 ${
                       activeTab === tab.id
                         ? 'bg-gold text-black font-semibold'
@@ -118,49 +129,35 @@ export const Settings = () => {
                         </Button>
                       </div>
                     )}
-                    {profile?.plan_type === 'pro' && (
-                      <Button
-                        variant="primary"
-                        size="md"
-                        onClick={() => handleUpgrade('pro_plus')}
-                        loading={checkoutLoading}
-                      >
-                        Upgrade to Pro Plus
-                      </Button>
-                    )}
                   </div>
-                  <p className="text-sm text-gray-600">
-                    {profile?.plan_type === 'free' && 'Free forever • 500 emails/month'}
-                    {profile?.plan_type === 'pro' && '$29/month • 25,000 emails/month'}
-                    {profile?.plan_type === 'pro_plus' && '$99/month • Unlimited emails'}
-                  </p>
                 </div>
-
-                <h3 className="font-semibold mb-4">Billing History</h3>
-                <p className="text-gray-600 text-sm">No invoices yet.</p>
+                {profile?.plan_type !== 'free' && (
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="font-semibold mb-2">Subscription Details</h3>
+                      <p className="text-sm text-gray-600">
+                        Your {profile?.plan_type.replace('_', ' ')} subscription is active.
+                      </p>
+                    </div>
+                    <Button variant="secondary" size="md">
+                      Manage Subscription
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === 'api' && (
               <div className="card max-w-2xl">
                 <h2 className="text-xl font-serif font-bold mb-6">API Keys</h2>
-                <p className="text-gray-600 mb-6">
-                  Use API keys to integrate Email Wizard with your applications.
+                <p className="text-gray-600 mb-4">
+                  Manage API keys for programmatic access to your account.
                 </p>
-                {profile?.plan_type === 'pro_plus' ? (
-                  <>
-                    <Button variant="primary" size="md" icon={Key}>
-                      Generate API Key
-                    </Button>
-                    <div className="mt-6">
-                      <p className="text-sm text-gray-600">No API keys yet.</p>
-                    </div>
-                  </>
-                ) : (
-                  <div className="bg-purple/10 border border-purple rounded-lg p-6 text-center">
-                    <p className="font-semibold mb-2">API Access on Pro Plus</p>
+                {profile?.plan_type !== 'pro_plus' ? (
+                  <div className="bg-gold/10 border border-gold rounded-lg p-6 text-center">
+                    <p className="font-semibold mb-2">API Access on Pro Plus Only</p>
                     <p className="text-sm text-gray-600 mb-4">
-                      Upgrade to Pro Plus to access our powerful API
+                      Upgrade to Pro Plus to access the API
                     </p>
                     <Button
                       variant="primary"
@@ -168,42 +165,12 @@ export const Settings = () => {
                       onClick={() => handleUpgrade('pro_plus')}
                       loading={checkoutLoading}
                     >
-                      Upgrade Now
+                      Upgrade to Pro Plus
                     </Button>
                   </div>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'domains' && (
-              <div className="card max-w-2xl">
-                <h2 className="text-xl font-serif font-bold mb-6">Sending Domains</h2>
-                <p className="text-gray-600 mb-6">
-                  Configure custom domains to send emails from your own domain.
-                </p>
-                {profile?.plan_type !== 'free' ? (
-                  <>
-                    <Button variant="primary" size="md" icon={Globe}>
-                      Add Domain
-                    </Button>
-                    <div className="mt-6">
-                      <p className="text-sm text-gray-600">No custom domains configured yet.</p>
-                    </div>
-                  </>
                 ) : (
-                  <div className="bg-gold/10 border border-gold rounded-lg p-6 text-center">
-                    <p className="font-semibold mb-2">Custom Domains on Pro and Pro Plus</p>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Upgrade to use your own sending domain
-                    </p>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleUpgrade('pro')}
-                      loading={checkoutLoading}
-                    >
-                      Upgrade Now
-                    </Button>
+                  <div>
+                    <p className="text-sm text-gray-600">API key management coming soon.</p>
                   </div>
                 )}
               </div>

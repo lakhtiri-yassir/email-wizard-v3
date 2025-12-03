@@ -12,6 +12,7 @@ import { Templates } from './pages/app/Templates';
 import { TemplateEditor } from './components/templates/TemplateEditor';
 import { Analytics } from './pages/app/Analytics';
 import { Settings } from './pages/app/Settings';
+import Domains from './pages/app/settings/Domains'; // ADD THIS IMPORT
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
@@ -80,6 +81,7 @@ function App() {
             <Route path="/app/template-editor" element={<ProtectedRoute><TemplateEditor /></ProtectedRoute>} />
             <Route path="/app/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             <Route path="/app/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/app/settings/domains" element={<ProtectedRoute><Domains /></ProtectedRoute>} /> {/* ADD THIS ROUTE */}
 
             {/* Redirect old routes */}
             <Route path="/app/audience" element={<Navigate to="/app/contacts" replace />} />
