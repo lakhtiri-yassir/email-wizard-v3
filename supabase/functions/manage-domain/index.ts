@@ -606,23 +606,25 @@ async function getDNSInstructions(supabase: any, userId: string, domainId: strin
     .single();
 
   if (error || !domain) {
+    console.error('❌ Domain not found:', error);
     throw new Error('Domain not found');
   }
 
   const dnsRecords = domain.dns_records || {};
-  console.log('📋 DNS Records:', JSON.stringify(dnsRecords, null, 2));
+  
+  console.log('📋 DNS Records from database:', JSON.stringify(dnsRecords, null, 2));
 
   const instructionsArray = [];
 
-  // 1. MX Record (mail_server)
-  if (dnsRecords.mail_server?.data) {
+  // MX Record (Mail Server)
+  if (dnsRecords.mail_server?.host && dnsRecords.mail_server?.data) {
     instructionsArray.push({
       step: instructionsArray.length + 1,
       title: 'Add MX Record',
       description: 'Mail exchange record for receiving emails',
       required: true,
       record: {
-        type: (dnsRecords.mail_server.type || 'MX').toUpperCase(), // Convert to uppercase
+        type: 'MX',
         host: dnsRecords.mail_server.host,
         value: dnsRecords.mail_server.data,
         ttl: 300,
@@ -631,49 +633,32 @@ async function getDNSInstructions(supabase: any, userId: string, domainId: strin
     });
   }
 
-  // 2. SPF Record (subdomain_spf)
-  if (dnsRecords.subdomain_spf?.data) {
+  // SPF Record
+  if (dnsRecords.spf?.host && dnsRecords.spf?.data) {
     instructionsArray.push({
       step: instructionsArray.length + 1,
-      title: 'Add TXT Record (SPF)',
+      title: 'Add SPF Record',
       description: 'Authorizes SendGrid to send emails on your behalf',
       required: true,
       record: {
-        type: (dnsRecords.subdomain_spf.type || 'TXT').toUpperCase(), // Convert to uppercase
-        host: dnsRecords.subdomain_spf.host,
-        value: dnsRecords.subdomain_spf.data,
+        type: 'TXT',
+        host: dnsRecords.spf.host,
+        value: dnsRecords.spf.data,
         ttl: 300,
-        valid: dnsRecords.subdomain_spf.valid || false
+        valid: dnsRecords.spf.valid || false
       }
     });
   }
 
-  // 3. DKIM Record (single TXT record)
-  if (dnsRecords.dkim?.data) {
+  // DKIM Record 1 (TXT format from SendGrid UI)
+  if (dnsRecords.dkim1?.host && dnsRecords.dkim1?.data) {
     instructionsArray.push({
       step: instructionsArray.length + 1,
-      title: 'Add TXT Record (DKIM)',
-      description: 'DKIM signature for email authentication',
+      title: 'Add DKIM Record 1',
+      description: 'First DKIM signature for email authentication',
       required: true,
       record: {
-        type: (dnsRecords.dkim.type || 'TXT').toUpperCase(), // Convert to uppercase
-        host: dnsRecords.dkim.host,
-        value: dnsRecords.dkim.data,
-        ttl: 300,
-        valid: dnsRecords.dkim.valid || false
-      }
-    });
-  }
-
-  // Alternative: DKIM1 (CNAME format)
-  if (dnsRecords.dkim1?.data && !dnsRecords.dkim?.data) {
-    instructionsArray.push({
-      step: instructionsArray.length + 1,
-      title: 'Add CNAME Record (DKIM 1)',
-      description: 'First DKIM signature',
-      required: true,
-      record: {
-        type: (dnsRecords.dkim1.type || 'CNAME').toUpperCase(),
+        type: dnsRecords.dkim1.type || 'TXT',
         host: dnsRecords.dkim1.host,
         value: dnsRecords.dkim1.data,
         ttl: 300,
@@ -682,15 +667,15 @@ async function getDNSInstructions(supabase: any, userId: string, domainId: strin
     });
   }
 
-  // Alternative: DKIM2 (CNAME format)
-  if (dnsRecords.dkim2?.data && !dnsRecords.dkim?.data) {
+  // DKIM Record 2 (if exists)
+  if (dnsRecords.dkim2?.host && dnsRecords.dkim2?.data) {
     instructionsArray.push({
       step: instructionsArray.length + 1,
-      title: 'Add CNAME Record (DKIM 2)',
-      description: 'Second DKIM signature',
+      title: 'Add DKIM Record 2',
+      description: 'Second DKIM signature for email authentication',
       required: true,
       record: {
-        type: (dnsRecords.dkim2.type || 'CNAME').toUpperCase(),
+        type: dnsRecords.dkim2.type || 'TXT',
         host: dnsRecords.dkim2.host,
         value: dnsRecords.dkim2.data,
         ttl: 300,
@@ -699,12 +684,12 @@ async function getDNSInstructions(supabase: any, userId: string, domainId: strin
     });
   }
 
-  // 4. DMARC Record (optional)
-  if (dnsRecords.dmarc?.data) {
+  // DMARC Record
+  if (dnsRecords.dmarc?.host && dnsRecords.dmarc?.data) {
     instructionsArray.push({
       step: instructionsArray.length + 1,
-      title: 'Add TXT Record (DMARC)',
-      description: 'Policy for handling authentication failures (optional)',
+      title: 'Add DMARC Record',
+      description: 'Policy for handling authentication failures',
       required: false,
       record: {
         type: 'TXT',
@@ -716,28 +701,53 @@ async function getDNSInstructions(supabase: any, userId: string, domainId: strin
     });
   }
 
+  // MAIL CNAME (if exists)
+  if (dnsRecords.mail_cname?.host && dnsRecords.mail_cname?.data) {
+    instructionsArray.push({
+      step: instructionsArray.length + 1,
+      title: 'Add CNAME Record (Mail)',
+      description: 'Links your domain to SendGrid mail servers',
+      required: true,
+      record: {
+        type: 'CNAME',
+        host: dnsRecords.mail_cname.host,
+        value: dnsRecords.mail_cname.data,
+        ttl: 300,
+        valid: dnsRecords.mail_cname.valid || false
+      }
+    });
+  }
+
   if (instructionsArray.length === 0) {
+    console.error('❌ No DNS records available');
     return {
       domain: domain.domain,
       status: 'failed',
       records: [],
       notes: [
         '⚠️ No DNS records available.',
-        'Please delete and re-add the domain.'
+        'The domain exists in SendGrid but DNS configuration is incomplete.',
+        '',
+        'To fix this:',
+        '1. Check SendGrid dashboard at https://app.sendgrid.com/settings/sender_auth',
+        '2. Find your domain and verify DNS records are visible there',
+        '3. If records are visible in SendGrid but not here, delete and re-add the domain',
+        '4. If records are missing in SendGrid too, delete the domain from SendGrid first'
       ]
     };
   }
 
-  console.log(`✅ Generated ${instructionsArray.length} DNS records`);
+  console.log(`✅ Generated ${instructionsArray.length} DNS instructions`);
 
   return {
     domain: domain.domain,
     status: domain.verification_status,
     records: instructionsArray,
     notes: [
-      'Add all DNS records to your domain registrar',
-      'DNS propagation takes 5 minutes to 48 hours',
-      'Click "Verify Domain" after adding all records'
+      'Add all DNS records to your domain registrar (Namecheap, GoDaddy, Cloudflare, etc.)',
+      'DNS propagation can take 5 minutes to 48 hours',
+      'After adding records, click "Verify Domain" to check configuration',
+      `Once verified, emails will be sent from: ${domain.domain}`
     ]
   };
 }
