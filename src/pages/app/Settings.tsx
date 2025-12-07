@@ -1,4 +1,4 @@
-import { User, Globe, CreditCard, Key, Bell, Shield } from 'lucide-react';
+import { User, Globe, CreditCard, Shield } from 'lucide-react';
 import { useState } from 'react';
 import { AppLayout } from '../../components/app/AppLayout';
 import { Button } from '../../components/ui/Button';
@@ -6,13 +6,12 @@ import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
 import { useStripeCheckout } from '../../hooks/useStripeCheckout';
 import DomainsContent from '../../components/settings/DomainsContent';
+import SecurityContent from '../../components/settings/SecurityContent';
 
 const tabs = [
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'domains', label: 'Sending Domains', icon: Globe },
   { id: 'billing', label: 'Billing', icon: CreditCard },
-  { id: 'api', label: 'API Keys', icon: Key },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'security', label: 'Security', icon: Shield },
 ];
 
@@ -143,43 +142,7 @@ export const Settings = () => {
               </div>
             )}
 
-            {activeTab === 'api' && (
-              <div className="card max-w-2xl">
-                <h2 className="text-xl font-serif font-bold mb-6">API Keys</h2>
-                <p className="text-gray-600 mb-4">
-                  Manage API keys for programmatic access to your account.
-                </p>
-                {profile?.plan_type !== 'pro_plus' ? (
-                  <div className="bg-gold/10 border border-gold rounded-lg p-6 text-center">
-                    <p className="font-semibold mb-2">API Access on Pro Plus Only</p>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Upgrade to Pro Plus to access the API
-                    </p>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleUpgrade('pro_plus')}
-                      loading={checkoutLoading}
-                    >
-                      Upgrade to Pro Plus
-                    </Button>
-                  </div>
-                ) : (
-                  <div>
-                    <p className="text-sm text-gray-600">API key management coming soon.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {(activeTab === 'notifications' || activeTab === 'security') && (
-              <div className="card max-w-2xl">
-                <h2 className="text-xl font-serif font-bold mb-6">
-                  {tabs.find((t) => t.id === activeTab)?.label}
-                </h2>
-                <p className="text-gray-600">Settings for this section coming soon.</p>
-              </div>
-            )}
+            {activeTab === 'security' && <SecurityContent />}
           </div>
         </div>
       </div>

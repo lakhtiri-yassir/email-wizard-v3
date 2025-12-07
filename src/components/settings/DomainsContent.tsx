@@ -96,19 +96,19 @@ export default function DomainsContent() {
   }
 
   /**
-   * Handles domain verification
+   * Handles domain verification by triggering DNS validation in SendGrid
    */
   async function handleVerify(domainId: string) {
     try {
-      const result = await domainService.verifyDomain(domainId);
-      
+      const result = await domainService.checkDomainStatus(domainId);
+
       if (result.success && result.domain) {
         // Update domain in state
-        setDomains(prev => prev.map(d => 
+        setDomains(prev => prev.map(d =>
           d.id === domainId ? result.domain! : d
         ));
       }
-      
+
       return result;
     } catch (err: any) {
       console.error('Verification failed:', err);

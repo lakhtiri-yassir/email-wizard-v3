@@ -201,13 +201,13 @@ export async function addDomain(domain: string): Promise<AddDomainResponse> {
 export async function verifyDomain(domainId: string): Promise<VerifyDomainResponse> {
   try {
     console.log(`🔍 Verifying domain: ${domainId}`);
-    
+
     const response = await makeAuthenticatedRequest(`/manage-domain/${domainId}/verify`, {
       method: 'POST'
     });
-    
+
     const data = await response.json();
-    
+
     if (!response.ok) {
       console.error('❌ Failed to verify domain:', data.error);
       return {
@@ -215,18 +215,59 @@ export async function verifyDomain(domainId: string): Promise<VerifyDomainRespon
         error: data.error || 'Failed to verify domain'
       };
     }
-    
+
     const isVerified = data.verification_status === 'verified';
     console.log(isVerified ? '✅ Domain verified!' : '⚠️ Domain not verified yet');
-    
+
     return {
       success: true,
       domain: data,
       validation_results: data.validation_results
     };
-    
+
   } catch (error: any) {
     console.error('❌ Exception verifying domain:', error);
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred'
+    };
+  }
+}
+
+/**
+ * Checks domain status by triggering SendGrid DNS validation
+ * This calls the dedicated check-domain-status edge function
+ */
+export async function checkDomainStatus(domainId: string): Promise<VerifyDomainResponse> {
+  try {
+    console.log(`🔍 Checking domain status: ${domainId}`);
+
+    const response = await makeAuthenticatedRequest('/check-domain-status', {
+      method: 'POST',
+      body: JSON.stringify({ domainId })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+      console.error('❌ Failed to check domain status:', data.error);
+      return {
+        success: false,
+        error: data.error || 'Failed to check domain status'
+      };
+    }
+
+    const isVerified = data.domain.verification_status === 'verified';
+    console.log(isVerified ? '✅ Domain verified!' : '⚠️ Domain not verified yet');
+
+    return {
+      success: true,
+      domain: data.domain,
+      validation_results: data.validation_results
+    };
+
+  } catch (error: any) {
+    console.error('❌ Exception checking domain status:', error);
     return {
       success: false,
       error: error.message || 'An unexpected error occurred'
@@ -579,11 +620,12 @@ export const domainService = {
   // CRUD operations
   addDomain,
   verifyDomain,
+  checkDomainStatus,
   listDomains,
   deleteDomain,
   setDefaultDomain,
   getDNSInstructions,
-  
+
   // Helper functions
   validateDomainFormat,
   formatDNSRecords,
