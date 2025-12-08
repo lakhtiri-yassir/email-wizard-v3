@@ -27,6 +27,7 @@ import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { supabase } from "../../lib/supabase";
 import toast from "react-hot-toast";
+import { useLocation } from 'react-router-dom';
 import CreateCampaignModal from "../../components/campaigns/CreateCampaignModal";
 
 interface Campaign {
@@ -86,6 +87,8 @@ export function Campaigns() {
   // View details modal state
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [detailsCampaign, setDetailsCampaign] = useState<Campaign | null>(null);
+  const location = useLocation();
+
 
   useEffect(() => {
     if (user) {
@@ -101,6 +104,14 @@ export function Campaigns() {
       updateRecipientCount();
     }
   }, [sendMode, selectedGroups, selectedContacts, showSendModal]);
+
+useEffect(() => {
+    if (location.state?.completedTemplate) {
+      console.log('📧 Detected completed template, auto-opening modal');
+      setShowCreateModal(true);
+    }
+  }, [location.state]);
+
 
   const fetchCampaigns = async () => {
     if (!user) return;
