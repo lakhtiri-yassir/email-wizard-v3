@@ -37,7 +37,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../app/AppLayout';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import SectionEditor, { Section } from './SectionEditor';
+import SectionEditor from './SectionEditor';
+import type { Section } from './SectionEditor';
 import ColorPicker from './ColorPicker';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -493,7 +494,6 @@ export default function TemplateEditor() {
                       <option value="'Times New Roman', Times, serif">Times New Roman</option>
                       <option value="'Courier New', Courier, monospace">Courier New</option>
                       <option value="Verdana, Geneva, sans-serif">Verdana</option>
-                      <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
                     </select>
                   </div>
                 </div>
@@ -605,4 +605,4 @@ export default function TemplateEditor() {
       )}
     </AppLayout>
   );
-};
+}
