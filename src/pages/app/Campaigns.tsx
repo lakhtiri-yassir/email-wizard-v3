@@ -570,6 +570,8 @@ useEffect(() => {
           <CreateCampaignModal
             onClose={() => setShowCreateModal(false)}
             onSuccess={(campaign) => {
+              window.history.replaceState({}, document.title);
+
               setShowCreateModal(false);
               fetchCampaigns();
               toast.success("Campaign created successfully!");
