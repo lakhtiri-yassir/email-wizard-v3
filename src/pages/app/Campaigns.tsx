@@ -19,6 +19,7 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  X,
 } from "lucide-react";
 import { AppLayout } from "../../components/app/AppLayout";
 import { useAuth } from "../../contexts/AuthContext";
@@ -81,6 +82,10 @@ export function Campaigns() {
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [recipientCount, setRecipientCount] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // View details modal state
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [detailsCampaign, setDetailsCampaign] = useState<Campaign | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -536,7 +541,8 @@ export function Campaigns() {
                           size="sm"
                           icon={Eye}
                           onClick={() => {
-                            /* View campaign details */
+                            setDetailsCampaign(campaign);
+                            setShowDetailsModal(true);
                           }}
                         >
                           View Details
@@ -750,6 +756,115 @@ export function Campaigns() {
                   icon={Send}
                 >
                   Send Campaign
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* View Campaign Details Modal */}
+        {showDetailsModal && detailsCampaign && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+              {/* Header */}
+              <div className="border-b-2 border-black p-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-serif font-bold">Campaign Details</h2>
+                  <button
+                    onClick={() => setShowDetailsModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6">
+                {/* Campaign Info */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-4">Campaign Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                      <p className="text-gray-900">{detailsCampaign.name}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Subject</label>
+                      <p className="text-gray-900">{detailsCampaign.subject}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                        detailsCampaign.status === 'sent' ? 'bg-green-100 text-green-800' :
+                        detailsCampaign.status === 'scheduled' ? 'bg-blue-100 text-blue-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {detailsCampaign.status}
+                      </span>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Recipients</label>
+                      <p className="text-gray-900">{detailsCampaign.recipients_count || 0}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Email Metrics */}
+                {detailsCampaign.status === 'sent' && (
+                  <div className="mb-6">
+                    <h3 className="text-lg font-semibold mb-4">Performance Metrics</h3>
+                    <div className="grid grid-cols-4 gap-4">
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                        <div className="text-2xl font-bold text-blue-900">{detailsCampaign.opens || 0}</div>
+                        <div className="text-sm text-blue-700">Opens</div>
+                      </div>
+                      <div className="bg-green-50 border-2 border-green-200 rounded-lg p-4">
+                        <div className="text-2xl font-bold text-green-900">{detailsCampaign.clicks || 0}</div>
+                        <div className="text-sm text-green-700">Clicks</div>
+                      </div>
+                      <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4">
+                        <div className="text-2xl font-bold text-red-900">{detailsCampaign.bounces || 0}</div>
+                        <div className="text-sm text-red-700">Bounces</div>
+                      </div>
+                      <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4">
+                        <div className="text-2xl font-bold text-purple-900">
+                          {detailsCampaign.opens && detailsCampaign.recipients_count
+                            ? Math.round((detailsCampaign.opens / detailsCampaign.recipients_count) * 100)
+                            : 0}%
+                        </div>
+                        <div className="text-sm text-purple-700">Open Rate</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Email Preview */}
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-4">Email Preview</h3>
+                  <div className="border-2 border-black rounded-lg p-4 bg-gray-50 max-h-96 overflow-auto">
+                    {detailsCampaign.content?.html ? (
+                      <iframe
+                        srcDoc={detailsCampaign.content.html}
+                        className="w-full h-full min-h-[400px] border-0"
+                        title="Email Preview"
+                        sandbox="allow-same-origin"
+                      />
+                    ) : (
+                      <p className="text-gray-500 text-center py-8">No email content available</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="border-t-2 border-black p-6">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowDetailsModal(false)}
+                  className="w-full"
+                >
+                  Close
                 </Button>
               </div>
             </div>

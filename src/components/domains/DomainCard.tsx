@@ -29,13 +29,14 @@
  */
 
 import { useState } from 'react';
-import { 
-  CheckCircle, 
-  Clock, 
-  XCircle, 
-  Star, 
-  Trash2, 
-  Eye, 
+import {
+  CheckCircle,
+  Clock,
+  XCircle,
+  Star,
+  StarOff,
+  Trash2,
+  Eye,
   RefreshCw,
   Globe
 } from 'lucide-react';
@@ -46,6 +47,7 @@ interface DomainCardProps {
   domain: Domain;
   onVerify: (domainId: string) => Promise<any>;
   onSetDefault: (domainId: string) => Promise<any>;
+  onRemoveDefault: (domainId: string) => Promise<any>;
   onDelete: (domainId: string) => Promise<any>;
   onViewDNS: (domainId: string) => void;
 }
@@ -57,12 +59,14 @@ export default function DomainCard({
   domain,
   onVerify,
   onSetDefault,
+  onRemoveDefault,
   onDelete,
   onViewDNS
 }: DomainCardProps) {
   // Loading states for async actions
   const [verifying, setVerifying] = useState(false);
   const [settingDefault, setSettingDefault] = useState(false);
+  const [removingDefault, setRemovingDefault] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   /**
@@ -81,6 +85,24 @@ export default function DomainCard({
     setSettingDefault(true);
     const result = await onSetDefault(domain.id);
     setSettingDefault(false);
+  }
+
+  /**
+   * Handles removing default status
+   */
+  async function handleRemoveDefault() {
+    if (!confirm('Remove this domain as default? You will need to set another domain as default.')) {
+      return;
+    }
+
+    setRemovingDefault(true);
+    try {
+      const result = await onRemoveDefault(domain.id);
+    } catch (err) {
+      console.error('Failed to remove default:', err);
+    } finally {
+      setRemovingDefault(false);
+    }
   }
 
   /**
@@ -251,6 +273,19 @@ export default function DomainCard({
             </Button>
           )}
 
+          {/* Remove Default Button (only for verified, IS default domains) */}
+          {isVerified && domain.is_default && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={StarOff}
+              onClick={handleRemoveDefault}
+              loading={removingDefault}
+            >
+              Remove Default
+            </Button>
+          )}
+
           {/* Delete Button */}
           <Button
             variant="destructive"
@@ -258,8 +293,6 @@ export default function DomainCard({
             icon={Trash2}
             onClick={handleDelete}
             loading={deleting}
-            disabled={domain.is_default}
-            title={domain.is_default ? 'Cannot delete default domain' : 'Delete domain'}
           >
             Delete
           </Button>

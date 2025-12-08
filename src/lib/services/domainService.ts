@@ -372,6 +372,42 @@ export async function setDefaultDomain(domainId: string): Promise<{ success: boo
 }
 
 /**
+ * Removes default status from a domain
+ */
+export async function removeDefaultDomain(domainId: string): Promise<{ success: boolean; domain?: Domain; error?: string }> {
+  try {
+    console.log(`⭐ Removing default status from domain: ${domainId}`);
+
+    const response = await makeAuthenticatedRequest(`/manage-domain/${domainId}/remove-default`, {
+      method: 'PATCH'
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error('❌ Failed to remove default status:', data.error);
+      return {
+        success: false,
+        error: data.error || 'Failed to remove default status'
+      };
+    }
+
+    console.log('✅ Default status removed');
+    return {
+      success: true,
+      domain: data
+    };
+
+  } catch (error: any) {
+    console.error('❌ Exception removing default status:', error);
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred'
+    };
+  }
+}
+
+/**
  * Gets DNS configuration instructions for a domain
  */
 export async function getDNSInstructions(domainId: string): Promise<DNSInstructions | null> {
@@ -624,6 +660,7 @@ export const domainService = {
   listDomains,
   deleteDomain,
   setDefaultDomain,
+  removeDefaultDomain,
   getDNSInstructions,
 
   // Helper functions

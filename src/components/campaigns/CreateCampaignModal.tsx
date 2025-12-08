@@ -65,6 +65,7 @@ interface CampaignFormData {
   // Step 2: Template
   templateId: string;
   customHtml: string | null;
+  inputMode: 'custom' | 'template';
 
   // Step 3: Recipients
   sendToMode: 'all' | 'groups' | 'contacts';
@@ -126,6 +127,7 @@ export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampai
     // Step 2
     templateId: '',
     customHtml: null,
+    inputMode: 'template',
 
     // Step 3
     sendToMode: 'all',
@@ -356,16 +358,47 @@ export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampai
    * Go to next step
    */
   function handleNext() {
-    // Special handling for Step 2 (template selection)
-    if (currentStep === 2) {
-      // Validation will be handled by Step2 component based on input mode
-      // This allows template editor navigation
-      return;
+    const newErrors: Record<string, string> = {};
+
+    if (currentStep === 1) {
+      // Step 1 validation
+      if (!validateStep(1)) {
+        return;
+      }
+      setCurrentStep(2);
+    } else if (currentStep === 2) {
+      // Step 2 validation - handle dual paths
+      if (formData.inputMode === 'custom') {
+        if (!formData.customHtml || formData.customHtml.trim().length === 0) {
+          setErrors({ customHtml: 'HTML code is required' });
+          return;
+        }
+        updateField('templateId', '');
+        setCurrentStep(3);
+      } else if (formData.inputMode === 'template') {
+        if (!formData.templateId) {
+          setErrors({ templateId: 'Please select a template' });
+          return;
+        }
+        // Navigate to template editor with campaign context
+        const params = new URLSearchParams({
+          template: formData.templateId,
+          createMode: 'true',
+          name: formData.name,
+          subject: formData.subject
+        });
+        navigate(`/app/template-editor?${params.toString()}`);
+        return;
+      }
+    } else if (currentStep === 3) {
+      // Step 3 validation
+      if (!validateStep(3)) {
+        return;
+      }
+      setCurrentStep(4);
     }
 
-    if (validateStep(currentStep)) {
-      setCurrentStep(prev => prev + 1);
-    }
+    setErrors({});
   }
 
   /**
@@ -601,9 +634,6 @@ export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampai
                   errors={errors}
                   updateField={updateField}
                   userPlan={profile?.plan_type || 'free'}
-                  navigate={navigate}
-                  setCurrentStep={setCurrentStep}
-                  setErrors={setErrors}
                 />
               )}
 
@@ -825,19 +855,12 @@ function Step2TemplateSelection({
   errors,
   updateField,
   userPlan,
-  navigate,
-  setCurrentStep,
-  setErrors,
 }: {
   formData: CampaignFormData;
   errors: Record<string, string>;
   updateField: (field: keyof CampaignFormData, value: any) => void;
   userPlan: string;
-  navigate: any;
-  setCurrentStep: (step: number) => void;
-  setErrors: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }) {
-  const [inputMode, setInputMode] = useState<'custom' | 'template'>('template');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
   const categories = [
@@ -854,35 +877,6 @@ function Step2TemplateSelection({
 
   const isPlusUser = userPlan === 'pro_plus';
 
-  function handleNext() {
-    if (inputMode === 'custom') {
-      // Validate custom HTML
-      if (!formData.customHtml || formData.customHtml.trim().length === 0) {
-        setErrors(prev => ({ ...prev, customHtml: 'HTML code is required' }));
-        return;
-      }
-      // Clear template selection if custom HTML is used
-      updateField('templateId', '');
-      // Proceed to step 3
-      setCurrentStep(3);
-    } else if (inputMode === 'template') {
-      if (!formData.templateId) {
-        setErrors(prev => ({ ...prev, templateId: 'Please select a template' }));
-        return;
-      }
-      // Navigate to template editor with campaign context
-      const params = new URLSearchParams({
-        template: formData.templateId,
-        createMode: 'true',
-        name: formData.name,
-        subject: formData.subject
-      });
-      navigate(`/app/template-editor?${params.toString()}`);
-      // Modal stays open in background
-      return;
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -895,15 +889,15 @@ function Step2TemplateSelection({
       {/* Input Mode Toggle */}
       <div className="grid grid-cols-2 gap-4">
         <button
-          onClick={() => setInputMode('custom')}
+          onClick={() => updateField('inputMode', 'custom')}
           className={`p-6 border-2 rounded-lg transition-all ${
-            inputMode === 'custom'
+            formData.inputMode === 'custom'
               ? 'border-purple bg-purple/5'
               : 'border-gray-300 hover:border-gray-400'
           }`}
         >
           <div className="flex flex-col items-center gap-3">
-            <Code size={32} className={inputMode === 'custom' ? 'text-purple' : 'text-gray-400'} />
+            <Code size={32} className={formData.inputMode === 'custom' ? 'text-purple' : 'text-gray-400'} />
             <div className="text-center">
               <div className="font-semibold">Custom HTML Code</div>
               <div className="text-sm text-gray-600 mt-1">
@@ -914,15 +908,15 @@ function Step2TemplateSelection({
         </button>
 
         <button
-          onClick={() => setInputMode('template')}
+          onClick={() => updateField('inputMode', 'template')}
           className={`p-6 border-2 rounded-lg transition-all ${
-            inputMode === 'template'
+            formData.inputMode === 'template'
               ? 'border-purple bg-purple/5'
               : 'border-gray-300 hover:border-gray-400'
           }`}
         >
           <div className="flex flex-col items-center gap-3">
-            <FileText size={32} className={inputMode === 'template' ? 'text-purple' : 'text-gray-400'} />
+            <FileText size={32} className={formData.inputMode === 'template' ? 'text-purple' : 'text-gray-400'} />
             <div className="text-center">
               <div className="font-semibold">Select Template</div>
               <div className="text-sm text-gray-600 mt-1">
@@ -934,7 +928,7 @@ function Step2TemplateSelection({
       </div>
 
       {/* Custom HTML Input */}
-      {inputMode === 'custom' && (
+      {formData.inputMode === 'custom' && (
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold mb-2">
@@ -989,7 +983,7 @@ function Step2TemplateSelection({
       )}
 
       {/* Template Selection */}
-      {inputMode === 'template' && (
+      {formData.inputMode === 'template' && (
         <>
           {errors.templateId && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
@@ -1106,18 +1100,6 @@ function Step2TemplateSelection({
           )}
         </>
       )}
-
-      {/* Next Button */}
-      <div className="flex justify-end pt-4 border-t">
-        <Button
-          variant="primary"
-          onClick={handleNext}
-          icon={<ChevronRight size={18} />}
-          iconPosition="end"
-        >
-          {inputMode === 'template' ? 'Customize Template' : 'Next'}
-        </Button>
-      </div>
     </div>
   );
 }

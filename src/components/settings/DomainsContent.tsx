@@ -122,7 +122,7 @@ export default function DomainsContent() {
   async function handleSetDefault(domainId: string) {
     try {
       const result = await domainService.setDefaultDomain(domainId);
-      
+
       if (result.success) {
         // Update all domains in state
         setDomains(prev => prev.map(d => ({
@@ -130,7 +130,7 @@ export default function DomainsContent() {
           is_default: d.id === domainId
         })));
       }
-      
+
       return result;
     } catch (err: any) {
       console.error('Failed to set default:', err);
@@ -139,22 +139,51 @@ export default function DomainsContent() {
   }
 
   /**
+   * Handles removing default status from a domain
+   */
+  async function handleRemoveDefault(domainId: string) {
+    try {
+      const result = await domainService.removeDefaultDomain(domainId);
+
+      if (result.success) {
+        // Update domain in state - remove default from this one
+        setDomains(prev => prev.map(d => ({
+          ...d,
+          is_default: d.id === domainId ? false : d.is_default
+        })));
+      }
+
+      return result;
+    } catch (err: any) {
+      console.error('Failed to remove default:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
    * Handles domain deletion
    */
   async function handleDelete(domainId: string) {
-    // Confirm deletion
-    if (!confirm('Are you sure you want to delete this domain? This action cannot be undone.')) {
+    const domainToDelete = domains.find(d => d.id === domainId);
+    const isDefault = domainToDelete?.is_default;
+
+    // Confirm deletion with appropriate message
+    const confirmMessage = isDefault
+      ? 'This is your default domain. Are you sure you want to delete it? Another verified domain will be set as default automatically.'
+      : 'Are you sure you want to delete this domain? This action cannot be undone.';
+
+    if (!confirm(confirmMessage)) {
       return { success: false };
     }
 
     try {
       const result = await domainService.deleteDomain(domainId);
-      
+
       if (result.success) {
         // Remove domain from state
         setDomains(prev => prev.filter(d => d.id !== domainId));
       }
-      
+
       return result;
     } catch (err: any) {
       console.error('Failed to delete domain:', err);
@@ -269,6 +298,7 @@ export default function DomainsContent() {
               domain={domain}
               onVerify={handleVerify}
               onSetDefault={handleSetDefault}
+              onRemoveDefault={handleRemoveDefault}
               onDelete={handleDelete}
               onViewDNS={handleViewDNS}
             />
