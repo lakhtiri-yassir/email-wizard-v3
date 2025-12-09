@@ -366,6 +366,17 @@ const handleSendNow = async (campaign: Campaign) => {
       return;
     }
 
+    // CRITICAL: Validate campaign data before sending
+    if (!selectedCampaign.subject || !selectedCampaign.subject.trim()) {
+      toast.error("Campaign subject is missing");
+      return;
+    }
+
+    if (!selectedCampaign.content || !selectedCampaign.content.html || !selectedCampaign.content.html.trim()) {
+      toast.error("Campaign content is missing");
+      return;
+    }
+
     const confirmMessage = `Send "${selectedCampaign.name}" to ${recipients.length} recipient(s)?`;
     if (!confirm(confirmMessage)) return;
 
@@ -382,21 +393,33 @@ const handleSendNow = async (campaign: Campaign) => {
 
       // Send emails individually to each recipient
       for (const recipient of recipients) {
+        // Skip recipients without valid email
+        if (!recipient.email || !recipient.email.trim()) {
+          failedCount++;
+          errors.push(`Contact ${recipient.id}: Missing email address`);
+          continue;
+        }
+
         try {
-          const { data, error } = await supabase.functions.invoke("send-email", {
-            body: {
-              to: recipient.email,
-              subject: selectedCampaign.subject,
-              html: selectedCampaign.content.html,
-              from_email: user?.email,
-              from_name: user?.user_metadata?.full_name || "Email Wizard",
-              campaign_id: selectedCampaign.id,
-              contact_id: recipient.id,
-              personalization: {
-                first_name: recipient.first_name || "",
-                last_name: recipient.last_name || "",
-              },
+          // Build payload with validation
+          const payload = {
+            to: recipient.email.trim(),
+            subject: selectedCampaign.subject.trim(),
+            html: selectedCampaign.content.html.trim(),
+            from_email: user?.email || "noreply@mailwizard.com",
+            from_name: user?.user_metadata?.full_name || "Email Wizard",
+            campaign_id: selectedCampaign.id,
+            contact_id: recipient.id,
+            personalization: {
+              first_name: recipient.first_name || "",
+              last_name: recipient.last_name || "",
             },
+          };
+
+          console.log(`Sending to ${recipient.email}...`, payload);
+
+          const { data, error } = await supabase.functions.invoke("send-email", {
+            body: payload
           });
 
           if (error) {
@@ -405,12 +428,16 @@ const handleSendNow = async (campaign: Campaign) => {
             console.error(`Failed to send to ${recipient.email}:`, error);
           } else {
             successCount++;
+            console.log(`✓ Sent to ${recipient.email}`);
           }
         } catch (error: any) {
           failedCount++;
-          errors.push(`${recipient.email}: ${error.message}`);
+          errors.push(`${recipient.email}: ${error.message || 'Unknown error'}`);
           console.error(`Error sending to ${recipient.email}:`, error);
         }
+
+        // Small delay to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       // Show results
