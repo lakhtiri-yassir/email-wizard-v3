@@ -667,14 +667,15 @@ const handleSendNow = async (campaign: Campaign) => {
                             {/* Send Now Button */}
                             <Button
                               variant="primary"
-                              size="sm"
+                              size="md"
                               icon={Send}
                               onClick={() => handleSendNow(campaign)}
                               loading={sendingNow === campaign.id}
                               disabled={sendingNow === campaign.id}
-                              className="flex-1 flex items-center justify-center"
+                              className="flex-[1.5] flex items-center justify-center gap-2"
                             >
-                              Send Now
+                              <Send size={18} />
+                              <span>Send Now</span>
                             </Button>
                           </div>
                         </div>
