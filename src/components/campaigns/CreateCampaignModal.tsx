@@ -96,13 +96,18 @@ interface ContactGroup {
 interface CreateCampaignModalProps {
   onClose: () => void;
   onSuccess: (campaign: Campaign) => void;
+  shouldLoadTemplate?: boolean;  
 }
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
-export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampaignModalProps) {
+export default function CreateCampaignModal({ 
+  onClose, 
+  onSuccess, 
+  shouldLoadTemplate = false 
+}: CreateCampaignModalProps) {
   const { user, profile } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -153,8 +158,10 @@ export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampai
 
   // Handle return from template editor
   useEffect(() => {
-    if (location.state?.completedTemplate) {
+    if (shouldLoadTemplate && location.state?.completedTemplate) {
       const { html, campaignName, campaignSubject } = location.state.completedTemplate;
+
+      console.log('✅ Loading template data - shouldLoadTemplate=true');
 
       // Update form data with template HTML
       setFormData(prev => ({
@@ -172,10 +179,11 @@ export default function CreateCampaignModal({ onClose, onSuccess }: CreateCampai
 
       toast.success('Template customization complete! Now select your recipients.');
     } else {
+      // Ensure we start at step 1 when not loading template
+      console.log('🆕 Starting fresh at Step 1 - shouldLoadTemplate=false');
       setCurrentStep(1);
     }
-    
-  }, [location.state]);
+  }, [shouldLoadTemplate, location.state]);
 
   /**
    * Load contacts and groups from database

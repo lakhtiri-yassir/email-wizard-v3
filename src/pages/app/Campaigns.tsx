@@ -84,6 +84,8 @@ export function Campaigns() {
   const [recipientCount, setRecipientCount] = useState(0);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [modalKey, setModalKey] = useState(0);
+  const [isReturningFromTemplate, setIsReturningFromTemplate] = useState(false);
+
 
   // View details modal state
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -106,12 +108,13 @@ export function Campaigns() {
     }
   }, [sendMode, selectedGroups, selectedContacts, showSendModal]);
 
-useEffect(() => {
-    if (location.state?.completedTemplate) {
-      console.log('📧 Detected completed template, auto-opening modal');
-      setShowCreateModal(true);
-    }
-  }, [location.state]);
+ useEffect(() => {
+  if (location.state?.completedTemplate) {
+    console.log('📧 Detected completed template, auto-opening modal');
+    setIsReturningFromTemplate(true);  // ← ADD: Set flag before opening
+    setShowCreateModal(true);
+  }
+}, [location.state]);
 
 
   const fetchCampaigns = async () => {
@@ -399,6 +402,7 @@ useEffect(() => {
             size="md"
             icon={Plus}
             onClick={() => {
+              setIsReturningFromTemplate(false);
               setModalKey(prev => prev + 1); 
               setShowCreateModal(true);
             }}
@@ -570,13 +574,16 @@ useEffect(() => {
         )}
         {showCreateModal && (
           <CreateCampaignModal
-            key={modalKey} // Reset modal state when key changes
+            key={modalKey}
+            shouldLoadTemplate={isReturningFromTemplate}  
             onClose={() => {
+              setIsReturningFromTemplate(false);  
               setModalKey(prev => prev + 1);
               setShowCreateModal(false);
             }}
             onSuccess={(campaign) => {
               window.history.replaceState({}, document.title);
+              setIsReturningFromTemplate(false);  
               setModalKey(prev => prev + 1);
               setShowCreateModal(false);
               fetchCampaigns();
