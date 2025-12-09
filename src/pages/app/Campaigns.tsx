@@ -664,18 +664,18 @@ const handleSendNow = async (campaign: Campaign) => {
                               Delete
                             </Button>
 
-                            {/* Send Now Button */}
                             <Button
                               variant="primary"
                               size="md"
-                              icon={Send}
                               onClick={() => handleSendNow(campaign)}
                               loading={sendingNow === campaign.id}
                               disabled={sendingNow === campaign.id}
-                              className="flex-[1.5] flex items-center justify-center gap-2"
+                              className="flex-[1.5]"
                             >
-                              <Send size={18} />
-                              <span>Send Now</span>
+                              <div className="flex items-center justify-center gap-2">
+                                <Send size={18} />
+                                <span className="whitespace-nowrap">Send Now</span>
+                              </div>
                             </Button>
                           </div>
                         </div>
