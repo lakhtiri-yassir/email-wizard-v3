@@ -40,6 +40,7 @@ interface Campaign {
   name: string;
   subject: string;
   content: { html: string };
+  custom_html: { html: string };
   status: string;
   recipients_count: number;
   opens: number;
@@ -357,117 +358,119 @@ const handleSendNow = async (campaign: Campaign) => {
   };
 
   const handleSendCampaign = async () => {
-    if (!selectedCampaign) return;
+  if (!selectedCampaign) return;
 
-    const recipients = await getRecipientList();
+  const recipients = await getRecipientList();
 
-    if (recipients.length === 0) {
-      toast.error("No recipients selected");
-      return;
-    }
+  if (recipients.length === 0) {
+    toast.error("No recipients selected");
+    return;
+  }
 
-    // CRITICAL: Validate campaign data before sending
-    if (!selectedCampaign.subject || !selectedCampaign.subject.trim()) {
-      toast.error("Campaign subject is missing");
-      return;
-    }
+  // CRITICAL FIX: Check for HTML in both possible locations
+  const campaignHtml = selectedCampaign.custom_html || selectedCampaign.content?.html;
 
-    if (!selectedCampaign.content || !selectedCampaign.content.html || !selectedCampaign.content.html.trim()) {
-      toast.error("Campaign content is missing");
-      return;
-    }
+  // Validate campaign data
+  if (!selectedCampaign.subject || !selectedCampaign.subject.trim()) {
+    toast.error("Campaign subject is missing");
+    return;
+  }
 
-    const confirmMessage = `Send "${selectedCampaign.name}" to ${recipients.length} recipient(s)?`;
-    if (!confirm(confirmMessage)) return;
+  if (!campaignHtml || !campaignHtml.trim()) {
+    toast.error("Campaign content is missing. Please edit the campaign and add HTML content.");
+    return;
+  }
 
-    setSending(selectedCampaign.id);
-    setShowSendModal(false);
-    const toastId = toast.loading(
-      `Sending to ${recipients.length} recipient(s)...`
-    );
+  const confirmMessage = `Send "${selectedCampaign.name}" to ${recipients.length} recipient(s)?`;
+  if (!confirm(confirmMessage)) return;
 
-    try {
-      let successCount = 0;
-      let failedCount = 0;
-      const errors: string[] = [];
+  setSending(selectedCampaign.id);
+  setShowSendModal(false);
+  const toastId = toast.loading(
+    `Sending to ${recipients.length} recipient(s)...`
+  );
 
-      // Send emails individually to each recipient
-      for (const recipient of recipients) {
-        // Skip recipients without valid email
-        if (!recipient.email || !recipient.email.trim()) {
-          failedCount++;
-          errors.push(`Contact ${recipient.id}: Missing email address`);
-          continue;
-        }
+  try {
+    let successCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
 
-        try {
-          // Build payload with validation
-          const payload = {
-            to: recipient.email.trim(),
-            subject: selectedCampaign.subject.trim(),
-            html: selectedCampaign.content.html.trim(),
-            from_email: user?.email || "noreply@mailwizard.com",
-            from_name: user?.user_metadata?.full_name || "Email Wizard",
-            campaign_id: selectedCampaign.id,
-            contact_id: recipient.id,
-            personalization: {
-              first_name: recipient.first_name || "",
-              last_name: recipient.last_name || "",
-            },
-          };
-
-          console.log(`Sending to ${recipient.email}...`, payload);
-
-          const { data, error } = await supabase.functions.invoke("send-email", {
-            body: payload
-          });
-
-          if (error) {
-            failedCount++;
-            errors.push(`${recipient.email}: ${error.message}`);
-            console.error(`Failed to send to ${recipient.email}:`, error);
-          } else {
-            successCount++;
-            console.log(`✓ Sent to ${recipient.email}`);
-          }
-        } catch (error: any) {
-          failedCount++;
-          errors.push(`${recipient.email}: ${error.message || 'Unknown error'}`);
-          console.error(`Error sending to ${recipient.email}:`, error);
-        }
-
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100));
+    // Send emails individually to each recipient
+    for (const recipient of recipients) {
+      // Skip recipients without valid email
+      if (!recipient.email || !recipient.email.trim()) {
+        failedCount++;
+        errors.push(`Contact ${recipient.id}: Missing email address`);
+        continue;
       }
 
-      // Show results
-      if (successCount > 0) {
-        if (failedCount === 0) {
-          toast.success(`Campaign sent to ${successCount} recipient(s)!`, {
-            id: toastId,
-          });
+      try {
+        const payload = {
+          to: recipient.email.trim(),
+          subject: selectedCampaign.subject.trim(),
+          html: campaignHtml.trim(), // ✅ Use the HTML from either location
+          from_email: user?.email || "noreply@mailwizard.com",
+          from_name: user?.user_metadata?.full_name || "Email Wizard",
+          campaign_id: selectedCampaign.id,
+          contact_id: recipient.id,
+          personalization: {
+            first_name: recipient.first_name || "",
+            last_name: recipient.last_name || "",
+          },
+        };
+
+        console.log(`Sending to ${recipient.email}...`);
+
+        const { data, error } = await supabase.functions.invoke("send-email", {
+          body: payload
+        });
+
+        if (error) {
+          failedCount++;
+          errors.push(`${recipient.email}: ${error.message}`);
+          console.error(`Failed to send to ${recipient.email}:`, error);
         } else {
-          toast.success(
-            `Sent to ${successCount} recipient(s). ${failedCount} failed.`,
-            { id: toastId }
-          );
-          console.error("Failed sends:", errors);
+          successCount++;
+          console.log(`✓ Sent to ${recipient.email}`);
         }
-      } else {
-        toast.error(`Failed to send campaign. ${failedCount} errors.`, {
+      } catch (error: any) {
+        failedCount++;
+        errors.push(`${recipient.email}: ${error.message || 'Unknown error'}`);
+        console.error(`Error sending to ${recipient.email}:`, error);
+      }
+
+      // Small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    // Show results
+    if (successCount > 0) {
+      if (failedCount === 0) {
+        toast.success(`Campaign sent to ${successCount} recipient(s)!`, {
           id: toastId,
         });
-        console.error("All sends failed:", errors);
+      } else {
+        toast.success(
+          `Sent to ${successCount} recipient(s). ${failedCount} failed.`,
+          { id: toastId }
+        );
+        console.error("Failed sends:", errors);
       }
-
-      fetchCampaigns(); // Refresh to show updated status
-    } catch (error: any) {
-      console.error("Error sending campaign:", error);
-      toast.error(error.message || "Failed to send campaign", { id: toastId });
-    } finally {
-      setSending(null);
+    } else {
+      toast.error(`Failed to send campaign. ${failedCount} errors.`, {
+        id: toastId,
+      });
+      console.error("All sends failed:", errors);
     }
-  };
+
+    fetchCampaigns(); // Refresh to show updated status
+  } catch (error: any) {
+    console.error("Error sending campaign:", error);
+    toast.error(error.message || "Failed to send campaign", { id: toastId });
+  } finally {
+    setSending(null);
+  }
+};
 
   /**
    * Get status badge styling and icon
