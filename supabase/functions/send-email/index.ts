@@ -27,8 +27,8 @@ const SENDGRID_API_KEY = Deno.env.get('SENDGRID_API_KEY') || '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 
-// Shared verified sending domain (must be verified in SendGrid)
-const SHARED_SENDING_DOMAIN = 'em2151.mailwizard.io';
+// ✅ FIX #1: Use correct verified sending domain from SendGrid
+const SHARED_SENDING_DOMAIN = 'mail.mailwizard.io';  // Changed from em2151.mailwizard.io
 
 // CORS headers
 const corsHeaders = {
@@ -135,11 +135,13 @@ async function determineSenderEmail(
   userId: string,
   userEmail: string,
   userMetadata: any,
-  requestedFromEmail: string | null,
   requestedFromName: string | null,
   campaignDomainId: string | null,
   supabase: any
 ) {
+  // Generate username for personalized sender
+  const username = generateUsername(userEmail, userMetadata);
+  
   let customDomain = null;
 
   // Priority 1: Use campaign-specified domain if provided
@@ -160,11 +162,11 @@ async function determineSenderEmail(
     customDomain = await getAnyVerifiedCustomDomain(userId, supabase);
   }
 
-  // If we have a custom domain, use it
+  // ✅ FIX #2: Always construct email with username@domain pattern
   if (customDomain) {
-    const fromEmail = requestedFromEmail || userEmail;
+    const fromEmail = `${username}@${customDomain.domain}`;
     console.log(`📧 Using custom domain sender: ${fromEmail}`);
-    console.log(`📧 Custom domain: ${customDomain.domain}`);
+    console.log(`🏷️  Custom domain: ${customDomain.domain}`);
     
     return {
       email: fromEmail,
@@ -174,10 +176,9 @@ async function determineSenderEmail(
     };
   } else {
     // Fallback: Use shared verified domain with username prefix
-    const username = generateUsername(userEmail, userMetadata);
     const generatedEmail = `${username}@${SHARED_SENDING_DOMAIN}`;
     console.log(`📧 Using shared domain sender: ${generatedEmail}`);
-    console.log(`📧 Replies will go to: ${requestedFromEmail || userEmail}`);
+    console.log(`📨 Replies will go to: ${userEmail}`);
     
     return {
       email: generatedEmail,
@@ -275,12 +276,11 @@ serve(async (req: Request) => {
       subject,
       html,
       text,
-      from_email,
       from_name,
       reply_to,
       campaign_id,
       contact_id,
-      sending_domain_id, // NEW: Domain ID from campaign
+      sending_domain_id, // Domain ID from campaign
       personalization = {}
     } = body;
 
@@ -329,14 +329,13 @@ serve(async (req: Request) => {
       user.id,
       user.email!,
       profile,
-      from_email,
       from_name,
       sending_domain_id,
       supabase
     );
 
     console.log(`📤 Final Sender: ${senderInfo.name} <${senderInfo.email}>`);
-    console.log(`🔄 Reply-To: ${reply_to || user.email}`);
+    console.log(`📨 Reply-To: ${reply_to || user.email}`);
 
     // Personalize content if contact data provided
     let personalizedHtml = html;
@@ -393,7 +392,7 @@ serve(async (req: Request) => {
     }
 
     // Send via SendGrid
-    console.log('📮 Sending email via SendGrid...');
+    console.log('🔮 Sending email via SendGrid...');
     
     const sendGridResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
