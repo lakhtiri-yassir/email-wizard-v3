@@ -188,7 +188,8 @@ export const Templates = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {displayTemplates.map((template) => {
             const isUserTemplate = !!template.user_id;
-            const hasPersonalization = template.supportsPersonalization || template.content?.settings;
+            const hasPersonalization = template.supportsPersonalization === true || 
+                                      template.content?.settings?.supportsPersonalization === true;
             const isLocked = hasPersonalization && !isPlusUser && !isUserTemplate;
             const mergeFields = hasPersonalization && template.htmlContent
               ? extractMergeFields(template.htmlContent)
