@@ -126,7 +126,11 @@ export default function CreateCampaignModal({
     subject: '',
     previewText: '',
     fromName: profile?.full_name || '',
-    fromEmail: user?.email || '',
+    // BUG FIX #1: Generate username from email for default sending domain
+    fromEmail: (() => {
+      const username = user?.email?.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '') || 'user';
+      return `${username}@mail.mailwizard.io`;
+    })(),
     replyTo: user?.email || '',
 
     // Step 2
@@ -470,11 +474,19 @@ export default function CreateCampaignModal({
         from_name: formData.fromName.trim(),
         from_email: formData.fromEmail.trim(),
         reply_to: formData.replyTo.trim(),
+
+        // BUG FIX #2: Save HTML content to custom_html column
+        custom_html: formData.customHtml?.trim() || null,
+
         content: {
           templateId: formData.templateId,
           description: formData.description.trim(),
+          // BUG FIX #2: Also save to content.html for backward compatibility
+          html: formData.customHtml?.trim() || null,
         },
-        status: 'draft',
+
+        // BUG FIX #3: Set correct initial status
+        status: formData.scheduleMode === 'now' ? 'ready_to_send' : 'draft',
         recipients_count: calculateRecipientCount(),
       };
 
