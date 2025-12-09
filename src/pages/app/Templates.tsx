@@ -240,7 +240,7 @@ export const Templates = () => {
 
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs px-2 py-1 bg-gray-100 rounded-full">
-                      {typeof template.category === 'string' ? template.category : 'custom'}
+                      {String(template.category || 'custom')}
                     </span>
                   </div>
 
