@@ -668,11 +668,11 @@ const handleSendNow = async (campaign: Campaign) => {
                             <Button
                               variant="primary"
                               size="sm"
-                              icon={Play}
+                              icon={Send}
                               onClick={() => handleSendNow(campaign)}
                               loading={sendingNow === campaign.id}
                               disabled={sendingNow === campaign.id}
-                              className="flex-1"
+                              className="flex-1 flex items-center justify-center"
                             >
                               Send Now
                             </Button>
