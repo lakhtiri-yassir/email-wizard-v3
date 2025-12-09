@@ -295,6 +295,39 @@ const handleSendNow = async (campaign: Campaign) => {
   const getRecipientList = async (): Promise<Contact[]> => {
     if (!user) return [];
 
+    // BUG FIX #3: If campaign has stored recipients, use those
+    if (selectedCampaign?.content?.recipients) {
+      const recipientData = selectedCampaign.content.recipients;
+
+      if (recipientData.sendToMode === 'all') {
+        return contacts.filter((c) => c.status === "active");
+      }
+
+      if (recipientData.sendToMode === 'contacts') {
+        return contacts.filter(
+          (c) => recipientData.selectedContacts.includes(c.id) && c.status === "active"
+        );
+      }
+
+      if (recipientData.sendToMode === 'groups') {
+        const { data: groupMembers, error } = await supabase
+          .from("contact_group_members")
+          .select("contact_id")
+          .in("group_id", recipientData.selectedGroups);
+
+        if (error) {
+          console.error("Error fetching group members:", error);
+          return [];
+        }
+
+        const contactIds = groupMembers.map((gm) => gm.contact_id);
+        return contacts.filter(
+          (c) => contactIds.includes(c.id) && c.status === "active"
+        );
+      }
+    }
+
+    // Existing logic below for when recipients selected in modal
     if (sendMode === "all") {
       return contacts.filter((c) => c.status === "active");
     }
