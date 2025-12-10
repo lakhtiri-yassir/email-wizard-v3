@@ -216,10 +216,10 @@ export default function CreateCampaignModal({
       if (groupsError) throw groupsError;
 
       const { data: domainsData } = await supabase
-        .from('domains')
+        .from('sending_domains')
         .select('id, domain, verified')
         .eq('user_id', user?.id)
-        .eq('verified', true);
+        .eq('verification_status', true);
 
       setContacts(contactsData || []);
       setGroups(groupsData || []);

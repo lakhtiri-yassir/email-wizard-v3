@@ -2,388 +2,344 @@
  * ============================================================================
  * Image Upload Component
  * ============================================================================
- *
- * Purpose: Upload and manage images for email templates
- *
+ * 
+ * Purpose: Handle image uploads to Supabase Storage with drag-and-drop
+ * 
  * Features:
- * - Drag and drop file upload
- * - Gallery view of uploaded images
- * - Image selection for templates
- * - Delete uploaded images
- * - Automatic CDN URL generation
- * - Storage in Supabase Storage bucket
- *
- * Props:
- * - onSelectImage: Callback when image is selected
- * - selectedUrl?: Currently selected image URL
- *
- * Design System Compliance:
- * - Uses Button component
- * - Uses brand colors (gold, purple)
- * - Proper loading and error states
- *
+ * - Drag and drop support
+ * - Click to browse files
+ * - Image preview before upload
+ * - Progress indicator
+ * - File validation (type and size)
+ * - Automatic upload to Supabase Storage
+ * - Returns public URL for use in templates
+ * 
  * ============================================================================
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { Upload, X, Check, Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
+import { useState, useRef, DragEvent, ChangeEvent } from 'react';
+import { Upload, Image as ImageIcon, X, Loader2, Check, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { Button } from '../ui/Button';
+import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
-interface MediaItem {
-  id: string;
-  filename: string;
-  public_url: string;
-  file_size: number;
-  mime_type: string;
-  width?: number;
-  height?: number;
-  created_at: string;
-}
-
 interface ImageUploadProps {
-  onSelectImage: (url: string) => void;
-  selectedUrl?: string;
+  onImageUploaded: (url: string) => void;
+  existingImageUrl?: string;
+  onRemove?: () => void;
+  maxSizeMB?: number;
+  acceptedTypes?: string[];
 }
 
-export default function ImageUpload({ onSelectImage, selectedUrl }: ImageUploadProps) {
-  const [images, setImages] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
+export default function ImageUpload({
+  onImageUploaded,
+  existingImageUrl,
+  onRemove,
+  maxSizeMB = 5,
+  acceptedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'],
+}: ImageUploadProps) {
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load user's images on mount
-  useEffect(() => {
-    loadImages();
-  }, []);
+  // State
+  const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(existingImageUrl || null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  /**
-   * Loads user's uploaded images from database
-   */
-  async function loadImages() {
-    try {
-      setLoading(true);
+  // ============================================================================
+  // FILE VALIDATION
+  // ============================================================================
 
-      const { data, error } = await supabase
-        .from('media_library')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      setImages(data || []);
-    } catch (error: any) {
-      console.error('Failed to load images:', error);
-      toast.error('Failed to load images');
-    } finally {
-      setLoading(false);
+  function validateFile(file: File): { valid: boolean; error?: string } {
+    // Check file type
+    if (!acceptedTypes.includes(file.type)) {
+      return {
+        valid: false,
+        error: `Invalid file type. Please upload: ${acceptedTypes.map(t => t.split('/')[1].toUpperCase()).join(', ')}`,
+      };
     }
+
+    // Check file size
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      return {
+        valid: false,
+        error: `File too large. Maximum size is ${maxSizeMB}MB`,
+      };
+    }
+
+    return { valid: true };
   }
 
-  /**
-   * Handles file upload
-   */
-  async function handleUpload(files: FileList | null) {
-    if (!files || files.length === 0) return;
+  // ============================================================================
+  // FILE UPLOAD HANDLER
+  // ============================================================================
 
-    const file = files[0];
-
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      toast.error('Please upload a valid image file (JPG, PNG, GIF, or WebP)');
+  async function handleFileUpload(file: File) {
+    if (!user) {
+      toast.error('You must be logged in to upload images');
       return;
     }
 
-    // Validate file size (5MB)
-    if (file.size > 5242880) {
-      toast.error('Image must be less than 5MB');
+    console.log('📤 Starting file upload:', file.name);
+
+    // Validate file
+    const validation = validateFile(file);
+    if (!validation.valid) {
+      setError(validation.error || 'Invalid file');
+      toast.error(validation.error || 'Invalid file');
       return;
     }
+
+    setError(null);
 
     try {
       setUploading(true);
-
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      setUploadProgress(20);
 
       // Generate unique filename
+      const fileExt = file.name.split('.').pop()?.toLowerCase();
       const timestamp = Date.now();
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${timestamp}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
+      const randomStr = Math.random().toString(36).substring(7);
+      const fileName = `${user.id}/${timestamp}-${randomStr}.${fileExt}`;
+
+      console.log('📁 Generated filename:', fileName);
+
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setPreviewUrl(e.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+
+      setUploadProgress(40);
 
       // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('media_library')
-        .upload(filePath, file, {
+      console.log('☁️ Uploading to Supabase Storage...');
+      
+      const { data, error: uploadError } = await supabase.storage
+        .from('template-images')
+        .upload(fileName, file, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('❌ Upload error:', uploadError);
+        throw uploadError;
+      }
+
+      console.log('✅ Upload successful:', data.path);
+      setUploadProgress(80);
 
       // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('media_library')
-        .getPublicUrl(filePath);
+      const { data: urlData } = supabase.storage
+        .from('template-images')
+        .getPublicUrl(fileName);
 
-      // Get image dimensions
-      const dimensions = await getImageDimensions(file);
+      const publicUrl = urlData.publicUrl;
+      console.log('🔗 Public URL:', publicUrl);
 
-      // Save to database
-      const { data: mediaItem, error: dbError } = await supabase
-        .from('media_library')
-        .insert({
-          user_id: user.id,
-          filename: file.name,
-          storage_path: filePath,
-          public_url: publicUrl,
-          file_size: file.size,
-          mime_type: file.type,
-          width: dimensions.width,
-          height: dimensions.height
-        })
-        .select()
-        .single();
+      setUploadProgress(100);
 
-      if (dbError) throw dbError;
+      // Call callback with URL
+      onImageUploaded(publicUrl);
+      toast.success('Image uploaded successfully!');
 
-      // Add to images list
-      setImages(prev => [mediaItem, ...prev]);
-      toast.success('Image uploaded successfully');
-
-      // Auto-select the uploaded image
-      onSelectImage(publicUrl);
+      setTimeout(() => {
+        setUploadProgress(0);
+      }, 1000);
 
     } catch (error: any) {
-      console.error('Upload error:', error);
+      console.error('❌ Upload failed:', error);
+      setError(error.message || 'Upload failed');
       toast.error(error.message || 'Failed to upload image');
+      setPreviewUrl(null);
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   }
 
-  /**
-   * Gets image dimensions
-   */
-  function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
+  // ============================================================================
+  // EVENT HANDLERS
+  // ============================================================================
 
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        resolve({ width: img.width, height: img.height });
-      };
-
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        resolve({ width: 0, height: 0 });
-      };
-
-      img.src = url;
-    });
-  }
-
-  /**
-   * Handles image deletion
-   */
-  async function handleDelete(image: MediaItem) {
-    if (!confirm('Delete this image? This cannot be undone.')) return;
-
-    try {
-      // Delete from storage
-      const { error: storageError } = await supabase.storage
-        .from('media_library')
-        .remove([image.storage_path]);
-
-      if (storageError) throw storageError;
-
-      // Delete from database
-      const { error: dbError } = await supabase
-        .from('media_library')
-        .delete()
-        .eq('id', image.id);
-
-      if (dbError) throw dbError;
-
-      // Remove from list
-      setImages(prev => prev.filter(img => img.id !== image.id));
-      toast.success('Image deleted');
-
-      // Deselect if this was selected
-      if (selectedUrl === image.public_url) {
-        onSelectImage('');
-      }
-
-    } catch (error: any) {
-      console.error('Delete error:', error);
-      toast.error('Failed to delete image');
-    }
-  }
-
-  /**
-   * Drag and drop handlers
-   */
-  function handleDrag(e: React.DragEvent) {
+  function handleDragEnter(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
+    setDragActive(true);
   }
 
-  function handleDrop(e: React.DragEvent) {
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }
+
+  function handleDragOver(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleUpload(e.dataTransfer.files);
+      const file = e.dataTransfer.files[0];
+      handleFileUpload(file);
     }
   }
 
-  /**
-   * Formats file size for display
-   */
-  function formatFileSize(bytes: number): string {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / 1048576).toFixed(1) + ' MB';
+  function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      handleFileUpload(file);
+    }
   }
 
+  function handleBrowseClick() {
+    fileInputRef.current?.click();
+  }
+
+  function handleRemoveImage() {
+    setPreviewUrl(null);
+    setError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+    if (onRemove) {
+      onRemove();
+    }
+  }
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Upload Area */}
-      <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-          dragActive
-            ? 'border-gold bg-gold/5'
-            : 'border-gray-300 hover:border-gray-400'
-        }`}
-        onDragEnter={handleDrag}
-        onDragLeave={handleDrag}
-        onDragOver={handleDrag}
-        onDrop={handleDrop}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/gif,image/webp"
-          onChange={(e) => handleUpload(e.target.files)}
-          className="hidden"
-          disabled={uploading}
-        />
+      {!previewUrl ? (
+        <div
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onClick={handleBrowseClick}
+          className={`
+            relative border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+            transition-all duration-200
+            ${dragActive 
+              ? 'border-purple bg-purple/5 scale-105' 
+              : 'border-gray-300 hover:border-purple hover:bg-purple/5'
+            }
+            ${uploading ? 'pointer-events-none opacity-50' : ''}
+          `}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={acceptedTypes.join(',')}
+            onChange={handleFileSelect}
+            className="hidden"
+            disabled={uploading}
+          />
 
-        {uploading ? (
           <div className="flex flex-col items-center gap-3">
-            <Loader2 className="w-12 h-12 text-gold animate-spin" />
-            <p className="text-sm text-gray-600">Uploading image...</p>
+            {uploading ? (
+              <>
+                <Loader2 size={48} className="text-purple animate-spin" />
+                <div className="w-full max-w-xs">
+                  <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-purple h-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-600 mt-2">
+                    Uploading... {uploadProgress}%
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <Upload size={48} className="text-gray-400" />
+                <div>
+                  <p className="text-lg font-medium mb-1">
+                    {dragActive ? 'Drop image here' : 'Upload Image'}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Drag and drop or click to browse
+                  </p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Supported: JPG, PNG, GIF, WebP (Max {maxSizeMB}MB)
+                  </p>
+                </div>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-gold/10 flex items-center justify-center">
-              <Upload className="w-6 h-6 text-gold" />
-            </div>
-            <div>
-              <p className="text-sm font-medium mb-1">
-                Drag and drop an image here, or
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Browse Files
-              </Button>
-            </div>
-            <p className="text-xs text-gray-500">
-              JPG, PNG, GIF, or WebP (max 5MB)
-            </p>
-          </div>
-        )}
-      </div>
 
-      {/* Image Gallery */}
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 text-gold animate-spin" />
-        </div>
-      ) : images.length === 0 ? (
-        <div className="text-center py-12 border border-gray-200 rounded-lg">
-          <ImageIcon className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-          <p className="text-gray-600">No images uploaded yet</p>
-          <p className="text-sm text-gray-500 mt-1">
-            Upload your first image to get started
-          </p>
+          {error && (
+            <div className="absolute bottom-2 left-2 right-2 bg-red-50 border border-red-200 rounded-lg p-2 flex items-center gap-2">
+              <AlertCircle size={16} className="text-red-600 flex-shrink-0" />
+              <p className="text-xs text-red-600">{error}</p>
+            </div>
+          )}
         </div>
       ) : (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-3">
-            Your Images ({images.length})
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {images.map((image) => (
-              <div
-                key={image.id}
-                className={`relative group rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
-                  selectedUrl === image.public_url
-                    ? 'border-gold shadow-md'
-                    : 'border-gray-200 hover:border-gray-300'
-                }`}
-                onClick={() => onSelectImage(image.public_url)}
-              >
-                {/* Image */}
-                <div className="aspect-square bg-gray-100">
-                  <img
-                    src={image.public_url}
-                    alt={image.filename}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
+        /* Preview Area */
+        <div className="relative border-2 border-black rounded-lg overflow-hidden group">
+          <img
+            src={previewUrl}
+            alt="Preview"
+            className="w-full h-64 object-cover"
+          />
 
-                {/* Selected Indicator */}
-                {selectedUrl === image.public_url && (
-                  <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-gold flex items-center justify-center">
-                    <Check className="w-4 h-4 text-black" />
-                  </div>
-                )}
-
-                {/* Hover Overlay */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
-                  <p className="text-white text-xs font-medium px-2 text-center truncate w-full">
-                    {image.filename}
-                  </p>
-                  <p className="text-white/80 text-xs">
-                    {image.width && image.height
-                      ? `${image.width} × ${image.height}`
-                      : formatFileSize(image.file_size)}
-                  </p>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(image);
-                    }}
-                    className="mt-2 p-2 bg-red-500 hover:bg-red-600 rounded-full transition-colors"
-                    title="Delete image"
-                  >
-                    <Trash2 className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-              </div>
-            ))}
+          {/* Overlay with actions */}
+          <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+            <button
+              onClick={handleBrowseClick}
+              className="px-4 py-2 bg-white rounded-lg font-medium hover:bg-gray-100 transition-colors flex items-center gap-2"
+            >
+              <Upload size={16} />
+              Change
+            </button>
+            <button
+              onClick={handleRemoveImage}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center gap-2"
+            >
+              <X size={16} />
+              Remove
+            </button>
           </div>
+
+          {/* Success indicator */}
+          {uploadProgress === 100 && (
+            <div className="absolute top-3 right-3 bg-green-500 text-white px-3 py-1 rounded-full flex items-center gap-2 animate-fade-in">
+              <Check size={16} />
+              <span className="text-sm font-medium">Uploaded</span>
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={acceptedTypes.join(',')}
+            onChange={handleFileSelect}
+            className="hidden"
+            disabled={uploading}
+          />
         </div>
       )}
+
+      {/* Help Text */}
+      <p className="text-xs text-gray-500">
+        💡 Images are stored securely and accessible only by you. They'll be embedded in your email templates.
+      </p>
     </div>
   );
 }

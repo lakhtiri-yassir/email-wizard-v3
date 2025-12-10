@@ -1,23 +1,58 @@
 /**
  * ============================================================================
- * Template Editor - Complete Section-Based Email Builder
+ * Template Editor Component
  * ============================================================================
- * FIXED VERSION - Resolves React Error #130
+ * 
+ * Purpose: Comprehensive email template editor with drag-and-drop sections
+ * 
+ * Features:
+ * - Create new templates or edit existing ones
+ * - Drag-and-drop section management
+ * - Live preview with iframe
+ * - Image upload integration
+ * - Template settings customization
+ * - Save as template or use in campaign
+ * 
+ * Modes:
+ * - 'create': Create new template (default)
+ * - 'edit': Edit existing template
+ * 
  * ============================================================================
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { AppLayout } from '../app/AppLayout';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  X,
+  Eye,
+  Plus,
+  Settings as SettingsIcon,
+  ChevronDown,
+  ChevronUp,
+  FileText,
+} from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import SectionEditor from './SectionEditor';
 import type { Section } from './SectionEditor';
-import ColorPicker from './ColorPicker';
+import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
+import { EMAIL_TEMPLATES } from '../../data/emailTemplates';
 import toast from 'react-hot-toast';
-import { Save, X, Info } from 'lucide-react';
-import { getTemplateSections, getTemplateSettings } from '../../data/templateSections';
+
+// ============================================================================
+// INTERFACES
+// ============================================================================
+
+interface TemplateEditorProps {
+  mode?: 'create' | 'edit';
+  existingTemplate?: any;
+  templateId?: string;
+  campaignName?: string;
+  campaignSubject?: string;
+  onSave?: (sections: Section[], settings: any, html: string) => void;
+  onCancel?: () => void;
+}
 
 interface EmailSettings {
   companyName: string;
@@ -27,124 +62,199 @@ interface EmailSettings {
   fontFamily: string;
 }
 
-function TemplateEditor() {
-  const [searchParams] = useSearchParams();
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
+export default function TemplateEditor({
+  mode = 'create',
+  existingTemplate,
+  templateId,
+  campaignName,
+  campaignSubject,
+  onSave,
+  onCancel,
+}: TemplateEditorProps) {
   const navigate = useNavigate();
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const location = useLocation();
+  const { user } = useAuth();
 
-  // Template data - FIXED: Proper searchParams access
-  const templateId = searchParams.get('template') || '';
-  const isCreationMode = searchParams.get('createMode') === 'true';
-  const campaignName = searchParams.get('name') || '';
-  const campaignSubject = searchParams.get('subject') || '';
+  // ============================================================================
+  // STATE
+  // ============================================================================
 
-  // Debug logging
-  console.log('🔍 Template editor mode:', {
-    isCreationMode,
-    campaignName,
-    campaignSubject,
-    templateId,
-    searchParams: Object.fromEntries(searchParams.entries())
-  });
-
-  // State
+  // Sections
   const [sections, setSections] = useState<Section[]>([]);
+
+  // Email Settings
   const [emailSettings, setEmailSettings] = useState<EmailSettings>({
-    companyName: 'Mail Wizard',
+    companyName: 'Your Company',
     backgroundColor: '#F5F5F5',
     textColor: '#333333',
     linkColor: '#f3ba42',
-    fontFamily: 'Arial, Helvetica, sans-serif'
+    fontFamily: 'DM Sans, sans-serif',
   });
-  const [loading, setLoading] = useState(false);
 
-  // Save template modal state
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [templateName, setTemplateName] = useState('');
+  // Template Metadata (for edit/save mode)
+  const [templateName, setTemplateName] = useState(
+    existingTemplate?.name || 'New Template'
+  );
+  const [templateCategory, setTemplateCategory] = useState(
+    existingTemplate?.category || 'custom'
+  );
+  const [templateDescription, setTemplateDescription] = useState(
+    existingTemplate?.description || ''
+  );
+
+  // UI State
+  const [showPreview, setShowPreview] = useState(false);
+  const [settingsExpanded, setSettingsExpanded] = useState(true);
   const [savingTemplate, setSavingTemplate] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savingForCampaign, setSavingForCampaign] = useState(false);
 
+  // ============================================================================
+  // EFFECTS
+  // ============================================================================
+
+  // Load existing template for edit mode
   useEffect(() => {
-    if (templateId) {
-      const templateSections = getTemplateSections(templateId);
-      const templateSettings = getTemplateSettings(templateId);
+    if (mode === 'edit' && existingTemplate) {
+      console.log('🔄 Loading template for editing:', existingTemplate.name);
 
-      if (templateSections) {
-        console.log(`Loading template sections for: ${templateId}`);
-        setSections(templateSections);
-
-        if (templateSettings) {
-          setEmailSettings(prev => ({
-            ...prev,
-            ...templateSettings
-          }));
-        }
-        return;
+      // Load existing sections
+      if (existingTemplate.content?.sections) {
+        console.log('📋 Loading sections:', existingTemplate.content.sections.length);
+        setSections(existingTemplate.content.sections);
       }
+
+      // Load existing settings
+      if (existingTemplate.content?.settings) {
+        console.log('⚙️ Loading settings:', existingTemplate.content.settings);
+        setEmailSettings((prev) => ({
+          ...prev,
+          ...existingTemplate.content.settings,
+        }));
+      }
+
+      // Set template metadata
+      setTemplateName(existingTemplate.name);
+      setTemplateCategory(existingTemplate.category || 'custom');
+      setTemplateDescription(existingTemplate.description || '');
+
+      console.log('✅ Template loaded for editing');
+    }
+  }, [mode, existingTemplate]);
+
+  // Load selected template from URL state (for campaign creation)
+  useEffect(() => {
+    const state = location.state as any;
+    const shouldLoadTemplate = state?.shouldLoadTemplate !== false;
+
+    if (!shouldLoadTemplate) {
+      console.log('🚫 Skipping template load (shouldLoadTemplate=false)');
+      return;
     }
 
-    const defaultSections: Section[] = [
-      {
-        id: 'header-1',
-        type: 'header',
-        content: {
-          title: 'Welcome to Our Newsletter',
-          subtitle: 'Stay updated with our latest news'
-        }
-      },
-      {
-        id: 'text-1',
-        type: 'text',
-        content: {
-          text: 'Dear Valued Customer,\n\nWe\'re excited to share our latest updates with you. This email contains important information about our products and services.'
-        }
-      },
-      {
-        id: 'button-1',
-        type: 'button',
-        content: {
-          buttonText: 'Learn More',
-          buttonUrl: 'https://example.com',
-          buttonColor: '#f3ba42'
-        }
-      },
-      {
-        id: 'divider-1',
-        type: 'divider',
-        content: {
-          dividerColor: '#E5E7EB'
-        }
+    // Check if returning from template selection
+    const selectedTemplate = state?.selectedTemplate;
+
+    if (selectedTemplate) {
+      console.log('📥 Loading selected template:', selectedTemplate.name);
+      loadTemplateData(selectedTemplate);
+    } else if (templateId) {
+      console.log('📥 Loading template by ID:', templateId);
+      loadTemplateById(templateId);
+    }
+  }, [location.state, templateId]);
+
+  // ============================================================================
+  // TEMPLATE LOADING
+  // ============================================================================
+
+  function loadTemplateData(template: any) {
+    console.log('🔄 Processing template data:', template.id);
+
+    // Load sections
+    if (template.content?.sections && Array.isArray(template.content.sections)) {
+      console.log('📋 Loading sections:', template.content.sections.length);
+      setSections(template.content.sections);
+    } else {
+      console.log('⚠️ No sections found in template, starting empty');
+      setSections([]);
+    }
+
+    // Load settings
+    if (template.content?.settings) {
+      console.log('⚙️ Loading settings:', template.content.settings);
+      setEmailSettings((prev) => ({
+        ...prev,
+        ...template.content.settings,
+      }));
+    }
+
+    console.log('✅ Template data loaded successfully');
+  }
+
+  async function loadTemplateById(id: string) {
+    try {
+      // Check if it's a preset template
+      const presetTemplate = EMAIL_TEMPLATES.find((t) => t.id === id);
+
+      if (presetTemplate) {
+        console.log('📦 Loading preset template:', presetTemplate.name);
+        loadTemplateData(presetTemplate);
+        return;
       }
-    ];
 
-    setSections(defaultSections);
-  }, [templateId]);
+      // Load from database
+      console.log('🔍 Fetching template from database:', id);
 
-  // Update preview when sections or settings change
-  useEffect(() => {
-    updatePreview();
-  }, [sections, emailSettings]);
+      const { data, error } = await supabase
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-  /**
-   * Generates complete HTML email from sections
-   */
+      if (error) throw error;
+
+      if (data) {
+        console.log('✅ Template fetched from database:', data.name);
+        loadTemplateData(data);
+      } else {
+        console.log('❌ Template not found');
+        toast.error('Template not found');
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to load template:', error);
+      toast.error('Failed to load template');
+    }
+  }
+
+  // ============================================================================
+  // HTML GENERATION
+  // ============================================================================
+
   function generateEmailHTML(): string {
     let sectionsHTML = '';
 
-    sections.forEach(section => {
+    sections.forEach((section) => {
       switch (section.type) {
         case 'header':
           sectionsHTML += `
             <tr>
-              <td style="padding: 40px 40px 20px 40px;">
+              <td style="padding: 40px 40px 20px 40px; text-align: center;">
                 <h1 style="margin: 0 0 10px 0; color: ${emailSettings.textColor}; font-size: 32px; font-weight: bold; font-family: ${emailSettings.fontFamily};">
                   ${section.content.title || ''}
                 </h1>
-                ${section.content.subtitle ? `
+                ${
+                  section.content.subtitle
+                    ? `
                   <p style="margin: 0; color: #666666; font-size: 16px; font-family: ${emailSettings.fontFamily};">
                     ${section.content.subtitle}
                   </p>
-                ` : ''}
+                `
+                    : ''
+                }
               </td>
             </tr>
           `;
@@ -168,11 +278,15 @@ function TemplateEditor() {
               <tr>
                 <td style="padding: 20px 40px;">
                   <img src="${section.content.imageUrl}" alt="${section.content.imageAlt || 'Image'}" style="max-width: 100%; height: auto; display: block; border-radius: 8px; margin: 0 auto;">
-                  ${section.content.caption ? `
+                  ${
+                    section.content.caption
+                      ? `
                     <p style="margin: 10px 0 0 0; color: #666666; font-size: 14px; text-align: center; font-style: italic; font-family: ${emailSettings.fontFamily};">
                       ${section.content.caption}
                     </p>
-                  ` : ''}
+                  `
+                      : ''
+                  }
                 </td>
               </tr>
             `;
@@ -215,39 +329,31 @@ function TemplateEditor() {
       }
     });
 
-    // Complete HTML email structure
     return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>${campaignSubject || 'Email Template'}</title>
-  <style>
-    body { margin: 0; padding: 0; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
-    table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
-    img { border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
-  </style>
+  <title>${templateName}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: ${emailSettings.fontFamily}; background-color: ${emailSettings.backgroundColor};">
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: ${emailSettings.backgroundColor};">
     <tr>
       <td align="center" style="padding: 20px 0;">
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width: 100%; max-width: 600px; background-color: #ffffff; border: 2px solid #000000; border-radius: 8px;">
-
           <!-- Company Header -->
           <tr>
-            <td style="background-color: #ffffff; padding: 30px 40px; text-align: center; border-bottom: 3px solid #f3ba42;">
+            <td style="background-color: #ffffff; padding: 30px 40px; text-align: center; border-bottom: 3px solid ${emailSettings.linkColor};">
               <h1 style="margin: 0; color: ${emailSettings.textColor}; font-size: 28px; font-weight: bold; font-family: 'DM Serif Display', Georgia, serif;">
                 ${emailSettings.companyName}
               </h1>
             </td>
           </tr>
-
-          <!-- Dynamic Sections -->
+          
+          <!-- Email Content Sections -->
           ${sectionsHTML}
-
+          
           <!-- Footer -->
           <tr>
             <td style="background-color: #f9f9f9; padding: 30px 40px; text-align: center; border-top: 2px solid #e5e7eb;">
@@ -259,7 +365,6 @@ function TemplateEditor() {
               </p>
             </td>
           </tr>
-
         </table>
       </td>
     </tr>
@@ -269,332 +374,519 @@ function TemplateEditor() {
     `.trim();
   }
 
-  /**
-   * Updates iframe preview
-   */
-  function updatePreview() {
-    if (!iframeRef.current) return;
+  // ============================================================================
+  // SAVE HANDLERS
+  // ============================================================================
 
-    const html = generateEmailHTML();
-    const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-
-    if (iframeDoc) {
-      iframeDoc.open();
-      iframeDoc.write(html);
-      iframeDoc.close();
-    }
-  }
-
-  /**
-   * Saves template and continues to campaign creation
-   */
-  async function handleSave() {
-    if (sections.length === 0) {
-      toast.error('Please add at least one section to your email');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const htmlContent = generateEmailHTML();
-
-      if (isCreationMode) {
-        console.log('📧 Template editor in creation mode - returning to campaign');
-        console.log('🔍 Campaign context:', { campaignName, campaignSubject });
-
-        // Campaign creation mode - navigate back with data
-        navigate('/app/campaigns', {
-          state: {
-            completedTemplate: {
-              html: htmlContent,
-              sections: sections,
-              settings: emailSettings,
-              campaignName: campaignName,
-              campaignSubject: campaignSubject
-            }
-          },
-          replace: true
-        });
-
-        toast.success('Template customized! Now select recipients.');
-        return;
-      } else {
-        // Normal template editing mode - just close
-        toast.success('Template updated');
-        navigate('/app/templates');
-      }
-    } catch (err: any) {
-      console.error('Save error:', err);
-      toast.error(err.message || 'Failed to save');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  /**
-   * Save template to library
-   */
+  // Save template to database (edit mode or "Save as Template")
   async function handleSaveTemplate() {
+    if (!user) {
+      toast.error('You must be logged in to save templates');
+      return;
+    }
+
+    // Validate template name
     if (!templateName.trim()) {
-      setSaveError('Template name is required');
+      toast.error('Please enter a template name');
       return;
     }
 
-    if (templateName.length > 255) {
-      setSaveError('Template name must be 255 characters or less');
-      return;
-    }
-
+    // Validate sections
     if (sections.length === 0) {
-      toast.error('Please add at least one section to your template');
+      toast.error('Template must have at least one section');
       return;
     }
-
-    setSavingTemplate(true);
-    setSaveError(null);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      setSavingTemplate(true);
 
+      // Generate HTML from sections
       const htmlContent = generateEmailHTML();
 
-      const { error } = await supabase
-        .from('templates')
-        .insert({
-          user_id: user.id,
-          name: templateName.trim(),
-          category: 'custom',
-          content: {
-            html: htmlContent,
-            sections: sections,
-            settings: emailSettings
-          },
-          is_locked: false,
-          thumbnail: null,
-        });
+      const templateData = {
+        name: templateName.trim(),
+        category: templateCategory,
+        description: templateDescription.trim() || null,
+        content: {
+          html: htmlContent,
+          sections: sections,
+          settings: emailSettings,
+        },
+        updated_at: new Date().toISOString(),
+      };
 
-      if (error) throw error;
+      if (mode === 'edit' && existingTemplate) {
+        // UPDATE existing template
+        console.log('💾 Updating template:', existingTemplate.id);
 
-      toast.success(`Template "${templateName}" saved successfully!`);
-      setShowSaveModal(false);
-      setTemplateName('');
-      navigate('/app/templates');
+        const { error } = await supabase
+          .from('templates')
+          .update(templateData)
+          .eq('id', existingTemplate.id);
 
-    } catch (err: any) {
-      console.error('Failed to save template:', err);
-      setSaveError(err.message || 'Failed to save template');
-      toast.error('Failed to save template');
+        if (error) throw error;
+
+        toast.success(`Template "${templateName}" updated successfully!`);
+
+        // Call onSave callback if provided
+        if (onSave) {
+          onSave(sections, emailSettings, htmlContent);
+        }
+      } else {
+        // INSERT new template
+        console.log('💾 Creating new template');
+
+        const { data, error } = await supabase
+          .from('templates')
+          .insert({
+            ...templateData,
+            user_id: user.id,
+            is_locked: false,
+            thumbnail: null,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        toast.success(`Template "${templateName}" created successfully!`);
+
+        // Call onSave callback if provided
+        if (onSave) {
+          onSave(sections, emailSettings, htmlContent);
+        }
+      }
+    } catch (error: any) {
+      console.error('Failed to save template:', error);
+      toast.error(error.message || 'Failed to save template');
     } finally {
       setSavingTemplate(false);
     }
   }
 
+  // Save for campaign (create mode only)
+  async function handleSaveForCampaign() {
+    if (!campaignName || !campaignSubject) {
+      toast.error('Campaign name and subject are required');
+      return;
+    }
+
+    if (sections.length === 0) {
+      toast.error('Template must have at least one section');
+      return;
+    }
+
+    try {
+      setSavingForCampaign(true);
+
+      // Generate HTML
+      const htmlContent = generateEmailHTML();
+
+      // Store in sessionStorage for campaign creation
+      sessionStorage.setItem(
+        'pendingCampaignTemplate',
+        JSON.stringify({
+          sections,
+          settings: emailSettings,
+          html: htmlContent,
+        })
+      );
+
+      // Call onSave callback if provided
+      if (onSave) {
+        onSave(sections, emailSettings, htmlContent);
+      } else {
+        // Navigate back to campaign creation
+        navigate('/app/campaigns/create', {
+          state: {
+            templateSaved: true,
+            campaignName,
+            campaignSubject,
+          },
+        });
+      }
+
+      toast.success('Template saved for campaign!');
+    } catch (error: any) {
+      console.error('Failed to save for campaign:', error);
+      toast.error(error.message || 'Failed to save template');
+    } finally {
+      setSavingForCampaign(false);
+    }
+  }
+
+  // ============================================================================
+  // UI HANDLERS
+  // ============================================================================
+
+  function handlePreview() {
+    setShowPreview(true);
+  }
+
+  function handleClosePreview() {
+    setShowPreview(false);
+  }
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   return (
-    <AppLayout currentPath="/app/templates">
-      <div className="h-screen flex flex-col bg-gray-50">
-        {/* Header */}
-        <div className="bg-white border-b-2 border-black p-6 flex-shrink-0">
-          <div className="flex items-center justify-between max-w-[1800px] mx-auto">
-            <div>
-              <h1 className="text-2xl font-serif font-bold">
-                {isCreationMode ? `Create Campaign: ${campaignName}` : 'Template Editor'}
-              </h1>
-              <p className="text-sm text-gray-600 mt-1">
-                {isCreationMode ? campaignSubject : 'Build your email template with drag-and-drop sections'}
-              </p>
-            </div>
-            <div className="flex gap-3">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Header */}
+      <div className="bg-white border-b-2 border-black px-8 py-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-serif font-bold">
+              {mode === 'edit' ? 'Edit Template' : 'Template Editor'}
+            </h1>
+            <p className="text-gray-600 mt-1">
+              {mode === 'edit'
+                ? 'Update your email template with drag-and-drop sections'
+                : 'Design your email template with drag-and-drop sections'}
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            {/* Cancel Button */}
+            {onCancel && (
               <Button
-                variant="tertiary"
-                onClick={() => navigate(isCreationMode ? '/app/campaigns' : '/app/templates')}
+                variant="secondary"
+                onClick={onCancel}
+                disabled={savingTemplate || savingForCampaign}
               >
                 Cancel
               </Button>
+            )}
 
-              {!isCreationMode && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowSaveModal(true)}
-                >
-                  <Save size={18} className="mr-2" />
-                  Save Template
-                </Button>
-              )}
+            {/* Preview Button */}
+            <Button variant="secondary" onClick={handlePreview}>
+              <Eye size={18} />
+              Preview
+            </Button>
 
+            {/* Save Button - Different text based on mode */}
+            {mode === 'edit' ? (
               <Button
                 variant="primary"
-                onClick={handleSave}
-                disabled={loading}
+                onClick={handleSaveTemplate}
+                loading={savingTemplate}
+                disabled={savingTemplate}
               >
-                {loading ? 'Saving...' : (isCreationMode ? 'Continue to Recipients' : 'Save & Close')}
+                {savingTemplate ? 'Updating...' : 'Update Template'}
               </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Main Content: Split View */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left: Section Editor */}
-          <div className="w-1/2 border-r-2 border-black overflow-y-auto bg-white p-6">
-            <div className="max-w-2xl mx-auto space-y-6">
-              {/* Email Settings */}
-              <div className="bg-white border-2 border-black rounded-lg p-6 shadow-sm">
-                <h2 className="text-lg font-serif font-bold mb-4">Email Settings</h2>
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Company Name</label>
-                    <input
-                      type="text"
-                      value={emailSettings.companyName}
-                      onChange={(e) => setEmailSettings(prev => ({ ...prev, companyName: e.target.value }))}
-                      className="w-full px-3 py-2 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple"
-                      placeholder="Your Company Name"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <ColorPicker
-                      color={emailSettings.backgroundColor}
-                      onChange={(color) => setEmailSettings(prev => ({ ...prev, backgroundColor: color }))}
-                      label="Background Color"
-                    />
-                    <ColorPicker
-                      color={emailSettings.textColor}
-                      onChange={(color) => setEmailSettings(prev => ({ ...prev, textColor: color }))}
-                      label="Text Color"
-                    />
-                  </div>
-
-                  <ColorPicker
-                    color={emailSettings.linkColor}
-                    onChange={(color) => setEmailSettings(prev => ({ ...prev, linkColor: color }))}
-                    label="Link Color"
-                  />
-
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Font Family</label>
-                    <select
-                      value={emailSettings.fontFamily}
-                      onChange={(e) => setEmailSettings(prev => ({ ...prev, fontFamily: e.target.value }))}
-                      className="w-full px-3 py-2 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple"
-                    >
-                      <option value="Arial, Helvetica, sans-serif">Arial</option>
-                      <option value="Georgia, serif">Georgia</option>
-                      <option value="'Times New Roman', Times, serif">Times New Roman</option>
-                      <option value="'Courier New', Courier, monospace">Courier New</option>
-                      <option value="Verdana, Geneva, sans-serif">Verdana</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* Section Editor */}
-              <div className="bg-white border-2 border-black rounded-lg p-6 shadow-sm">
-                <h2 className="text-lg font-serif font-bold mb-4">Email Content</h2>
-                <SectionEditor
-                  sections={sections}
-                  onChange={setSections}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Live Preview */}
-          <div className="w-1/2 bg-gray-100 p-6 overflow-y-auto">
-            <div className="max-w-3xl mx-auto">
-              <div className="bg-white border-2 border-black rounded-lg overflow-hidden shadow-lg sticky top-0">
-                <div className="bg-gold px-4 py-3 border-b-2 border-black">
-                  <h3 className="font-bold text-black">Live Preview</h3>
-                  <p className="text-xs text-black/70 mt-1">Updates in real-time as you edit</p>
-                </div>
-                <div className="bg-gray-100 p-2">
-                  <iframe
-                    ref={iframeRef}
-                    className="w-full bg-white border-2 border-gray-300 rounded"
-                    style={{
-                      height: 'calc(100vh - 180px)',
-                      minHeight: '600px'
-                    }}
-                    title="Email Preview"
-                    sandbox="allow-same-origin allow-scripts"
-                  />
-                </div>
-              </div>
-            </div>
+            ) : (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={handleSaveTemplate}
+                  loading={savingTemplate}
+                  disabled={savingTemplate || savingForCampaign}
+                >
+                  {savingTemplate ? 'Saving...' : 'Save as Template'}
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleSaveForCampaign}
+                  loading={savingForCampaign}
+                  disabled={savingTemplate || savingForCampaign}
+                >
+                  {savingForCampaign ? 'Saving...' : 'Save for Campaign'}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Save Template Modal */}
-      {showSaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setShowSaveModal(false)} />
-          <div className="relative bg-white rounded-lg max-w-md w-full shadow-2xl border-2 border-black">
-            <div className="flex items-center justify-between p-6 border-b border-gray-200">
-              <h3 className="text-xl font-serif font-bold">Save Template</h3>
-              <button
-                onClick={() => setShowSaveModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar - Settings */}
+        <div className="w-80 bg-white border-r-2 border-black overflow-y-auto">
+          <div className="p-6 space-y-6">
+            {/* Template Metadata (edit mode only) */}
+            {mode === 'edit' && (
+              <div className="bg-purple/5 border-2 border-purple rounded-lg p-4 space-y-4">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <FileText size={20} />
+                  Template Info
+                </h3>
 
-            <div className="p-6">
-              <div className="space-y-4">
+                {/* Template Name */}
                 <div>
-                  <label className="block text-sm font-semibold mb-2">
-                    Template Name <span className="text-red-600">*</span>
+                  <label className="block text-sm font-medium mb-2">
+                    Template Name <span className="text-red-500">*</span>
                   </label>
                   <Input
                     type="text"
                     value={templateName}
-                    onChange={(e) => {
-                      setTemplateName(e.target.value);
-                      setSaveError(null);
-                    }}
-                    placeholder="My Awesome Email Template"
-                    error={saveError || undefined}
+                    onChange={(e) => setTemplateName(e.target.value)}
+                    placeholder="My Email Template"
                   />
-                  <p className="mt-1 text-xs text-gray-600">
-                    {templateName.length}/255 characters
-                  </p>
                 </div>
 
-                <div className="bg-purple/5 border border-purple/20 rounded-lg p-4">
-                  <div className="flex gap-3">
-                    <Info size={18} className="text-purple flex-shrink-0 mt-0.5" />
-                    <div className="text-sm text-gray-700">
-                      This template will be saved to "My Templates" and can be reused for future campaigns.
+                {/* Template Category */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Category
+                  </label>
+                  <select
+                    value={templateCategory}
+                    onChange={(e) => setTemplateCategory(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple"
+                  >
+                    <option value="custom">Custom</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="newsletter">Newsletter</option>
+                    <option value="onboarding">Onboarding</option>
+                    <option value="transactional">Transactional</option>
+                    <option value="events">Events</option>
+                  </select>
+                </div>
+
+                {/* Template Description */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Description{' '}
+                    <span className="text-gray-400">(Optional)</span>
+                  </label>
+                  <textarea
+                    value={templateDescription}
+                    onChange={(e) => setTemplateDescription(e.target.value)}
+                    placeholder="Brief description of this template..."
+                    rows={3}
+                    className="w-full px-4 py-3 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple resize-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Email Settings */}
+            <div className="bg-gold/10 border-2 border-gold rounded-lg p-4 space-y-4">
+              <button
+                onClick={() => setSettingsExpanded(!settingsExpanded)}
+                className="w-full flex items-center justify-between font-bold text-lg"
+              >
+                <span className="flex items-center gap-2">
+                  <SettingsIcon size={20} />
+                  Email Settings
+                </span>
+                {settingsExpanded ? (
+                  <ChevronUp size={20} />
+                ) : (
+                  <ChevronDown size={20} />
+                )}
+              </button>
+
+              {settingsExpanded && (
+                <div className="space-y-4 pt-2">
+                  {/* Company Name */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Company Name
+                    </label>
+                    <Input
+                      type="text"
+                      value={emailSettings.companyName}
+                      onChange={(e) =>
+                        setEmailSettings((prev) => ({
+                          ...prev,
+                          companyName: e.target.value,
+                        }))
+                      }
+                      placeholder="Your Company"
+                    />
+                  </div>
+
+                  {/* Background Color */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Background Color
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={emailSettings.backgroundColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            backgroundColor: e.target.value,
+                          }))
+                        }
+                        className="w-12 h-12 border-2 border-black rounded cursor-pointer"
+                      />
+                      <Input
+                        type="text"
+                        value={emailSettings.backgroundColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            backgroundColor: e.target.value,
+                          }))
+                        }
+                        className="flex-1"
+                      />
                     </div>
                   </div>
+
+                  {/* Text Color */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Text Color
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={emailSettings.textColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            textColor: e.target.value,
+                          }))
+                        }
+                        className="w-12 h-12 border-2 border-black rounded cursor-pointer"
+                      />
+                      <Input
+                        type="text"
+                        value={emailSettings.textColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            textColor: e.target.value,
+                          }))
+                        }
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Link Color */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Link/Accent Color
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="color"
+                        value={emailSettings.linkColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            linkColor: e.target.value,
+                          }))
+                        }
+                        className="w-12 h-12 border-2 border-black rounded cursor-pointer"
+                      />
+                      <Input
+                        type="text"
+                        value={emailSettings.linkColor}
+                        onChange={(e) =>
+                          setEmailSettings((prev) => ({
+                            ...prev,
+                            linkColor: e.target.value,
+                          }))
+                        }
+                        className="flex-1"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Font Family */}
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Font Family
+                    </label>
+                    <select
+                      value={emailSettings.fontFamily}
+                      onChange={(e) =>
+                        setEmailSettings((prev) => ({
+                          ...prev,
+                          fontFamily: e.target.value,
+                        }))
+                      }
+                      className="w-full px-4 py-3 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple"
+                    >
+                      <option value="DM Sans, sans-serif">DM Sans</option>
+                      <option value="Arial, sans-serif">Arial</option>
+                      <option value="Helvetica, sans-serif">Helvetica</option>
+                      <option value="Georgia, serif">Georgia</option>
+                      <option value="Times New Roman, serif">
+                        Times New Roman
+                      </option>
+                      <option value="Courier New, monospace">
+                        Courier New
+                      </option>
+                    </select>
+                  </div>
                 </div>
+              )}
+            </div>
+
+            {/* Help Text */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-sm text-blue-800">
+                <strong>💡 Tip:</strong> Drag sections to reorder them, click
+                to edit content. Use merge fields like{' '}
+                <code className="bg-blue-100 px-1 rounded">
+                  {'{{MERGE:first_name}}'}
+                </code>{' '}
+                for personalization.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Center - Section Editor */}
+        <div className="flex-1 overflow-y-auto p-8">
+          <div className="max-w-4xl mx-auto">
+            <SectionEditor sections={sections} onChange={setSections} />
+          </div>
+        </div>
+      </div>
+
+      {/* Preview Modal */}
+      {showPreview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border-2 border-black">
+            {/* Modal Header */}
+            <div className="border-b-2 border-black p-6 bg-gold">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-serif font-bold">Email Preview</h2>
+                <button
+                  onClick={handleClosePreview}
+                  className="p-2 hover:bg-black/10 rounded-lg transition-colors"
+                >
+                  <X size={24} />
+                </button>
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
-              <Button
-                variant="secondary"
-                onClick={() => setShowSaveModal(false)}
-                disabled={savingTemplate}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleSaveTemplate}
-                disabled={savingTemplate || !templateName.trim()}
-              >
-                {savingTemplate ? 'Saving...' : 'Save Template'}
+            {/* Modal Content */}
+            <div className="flex-1 overflow-hidden p-6 bg-gray-100">
+              <iframe
+                srcDoc={generateEmailHTML()}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: '2px solid #000000',
+                  borderRadius: '8px',
+                  backgroundColor: '#ffffff',
+                }}
+                title="Email Preview"
+                sandbox="allow-same-origin"
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t-2 border-black p-6 bg-gray-50">
+              <Button variant="secondary" onClick={handleClosePreview}>
+                Close Preview
               </Button>
             </div>
           </div>
         </div>
       )}
-    </AppLayout>
+    </div>
   );
 }
-
-export default TemplateEditor;

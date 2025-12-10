@@ -12,6 +12,7 @@ import { Templates } from './pages/app/Templates';
 import TemplateEditor from './components/templates/TemplateEditor';
 import { Analytics } from './pages/app/Analytics';
 import { Settings } from './pages/app/Settings';
+import TemplateEdit from './pages/app/TemplateEdit';
 import Domains from './pages/app/settings/Domains'; // ADD THIS IMPORT
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminLoginPage } from './pages/admin/AdminLoginPage';
@@ -74,6 +75,14 @@ function App() {
             <Route path="/signup" element={<SignupPage />} />
 
             {/* Protected App Routes */}
+            <Route
+  path="/app/templates/edit/:templateId"
+  element={
+    <ProtectedRoute>
+      <TemplateEdit />
+    </ProtectedRoute>
+  }
+/>
             <Route path="/app/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/app/contacts" element={<ProtectedRoute><Contacts /></ProtectedRoute>} />
             <Route path="/app/campaigns" element={<ProtectedRoute><Campaigns /></ProtectedRoute>} />
