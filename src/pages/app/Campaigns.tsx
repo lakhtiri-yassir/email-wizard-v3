@@ -103,6 +103,20 @@ export function Campaigns() {
   const [detailsCampaign, setDetailsCampaign] = useState<Campaign | null>(null);
   const location = useLocation();
 
+  // Add this useEffect in Campaigns component
+useEffect(() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const resumeCampaign = urlParams.get('resumeCampaign');
+  
+  if (resumeCampaign === 'true') {
+    // Open create campaign modal
+    setShowCreateModal(true);
+    
+    // Clean up URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}, []);
+
 
   useEffect(() => {
     if (user) {

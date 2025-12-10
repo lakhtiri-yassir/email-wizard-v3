@@ -169,6 +169,36 @@ export default function CreateCampaignModal({
   useEffect(() => {
     loadContactsAndGroups();
   }, []);
+  // Add this near the top of the CreateCampaignModal function
+useEffect(() => {
+  // Check if returning from template editor
+  const campaignDraft = sessionStorage.getItem('campaignDraft');
+  const editedTemplate = sessionStorage.getItem('editedTemplate');
+  
+  if (campaignDraft && editedTemplate) {
+    try {
+      const draft = JSON.parse(campaignDraft);
+      const template = JSON.parse(editedTemplate);
+      
+      // Restore campaign state
+      setFormData({
+        ...draft.formData,
+        customHtml: template.html || template.content?.html || ''
+      });
+      
+      // Move to step 3 (Recipients)
+      setCurrentStep(3);
+      
+      // Clean up sessionStorage
+      sessionStorage.removeItem('campaignDraft');
+      sessionStorage.removeItem('editedTemplate');
+      
+      toast.success('Template loaded! Now select recipients.');
+    } catch (error) {
+      console.error('Error restoring campaign draft:', error);
+    }
+  }
+}, []);
 
   // Handle return from template editor
   useEffect(() => {
@@ -445,7 +475,7 @@ export default function CreateCampaignModal({
           name: formData.name,
           subject: formData.subject
         });
-        navigate(`/app/template-editor?${params.toString()}`);
+        navigate(`/app/template/editor?templateId=${formData.templateId}&returnToCampaign=true`);
         return;
       }
     } else if (currentStep === 3) {
