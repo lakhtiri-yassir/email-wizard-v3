@@ -264,8 +264,13 @@ const handleSendNow = async (campaign: Campaign) => {
 };
 
   const handleQuickSend = async (campaign: Campaign) => {
+  console.log('🚀 handleQuickSend started', { campaignId: campaign.id, campaignName: campaign.name });
+  
   const storedRecipients = (campaign as any).content?.recipients;
+  console.log('📋 Stored recipients:', storedRecipients);
+  
   if (!storedRecipients) {
+    console.log('❌ No stored recipients, opening modal');
     handleOpenSendModal(campaign);
     return;
   }
@@ -275,68 +280,111 @@ const handleSendNow = async (campaign: Campaign) => {
   // Step 1: Build recipient list
   let recipientList: Contact[] = [];
 
-  if (storedRecipients.sendToMode === 'all') {
-    recipientList = contacts.filter((c) => c.status === "active");
-  } else if (storedRecipients.sendToMode === 'contacts') {
-    recipientList = contacts.filter(
-      (c) => storedRecipients.selectedContacts.includes(c.id) && c.status === "active"
-    );
-  } else if (storedRecipients.sendToMode === 'groups') {
-    const { data: groupMembers } = await supabase
-      .from("contact_group_members")
-      .select("contact_id")
-      .in("group_id", storedRecipients.selectedGroups);
-
-    if (groupMembers) {
-      const contactIds = groupMembers.map((gm) => gm.contact_id);
-      recipientList = contacts.filter(
-        (c) => contactIds.includes(c.id) && c.status === "active"
-      );
-    }
-  }
-
-  if (recipientList.length === 0) {
-    toast.error("No active recipients found for this campaign");
-    return;
-  }
-
-  // Step 2: Validate campaign content
-  const campaignHtml = (campaign as any).custom_html || (campaign as any).content?.html;
-
-  if (!campaign.subject?.trim()) {
-    toast.error("Campaign subject is missing");
-    return;
-  }
-
-  if (!campaignHtml?.trim()) {
-    toast.error("Campaign content is missing");
-    return;
-  }
-
-  // Step 3: Confirmation dialog
-  const confirmMessage = 
-    `📧 Send Campaign Confirmation\n\n` +
-    `Campaign: "${campaign.name}"\n` +
-    `Subject: "${campaign.subject}"\n` +
-    `Recipients: ${recipientList.length} contact${recipientList.length !== 1 ? 's' : ''}\n` +
-    `Mode: ${storedRecipients.sendToMode}\n\n` +
-    `This will send emails immediately. This action cannot be undone.\n\nContinue?`;
-  
-  if (!confirm(confirmMessage)) return;
-
-  // Step 4: Start sending process
-  setSending(campaign.id);
-  const toastId = toast.loading(`Sending to ${recipientList.length} recipient${recipientList.length !== 1 ? 's' : ''}...`);
-
   try {
+    if (storedRecipients.sendToMode === 'all') {
+      console.log('📧 Send mode: ALL');
+      recipientList = contacts.filter((c) => c.status === "active");
+    } else if (storedRecipients.sendToMode === 'contacts') {
+      console.log('📧 Send mode: CONTACTS', storedRecipients.selectedContacts);
+      recipientList = contacts.filter(
+        (c) => storedRecipients.selectedContacts.includes(c.id) && c.status === "active"
+      );
+    } else if (storedRecipients.sendToMode === 'groups') {
+      console.log('📧 Send mode: GROUPS', storedRecipients.selectedGroups);
+      const { data: groupMembers, error: groupError } = await supabase
+        .from("contact_group_members")
+        .select("contact_id")
+        .in("group_id", storedRecipients.selectedGroups);
+
+      if (groupError) {
+        console.error('❌ Error fetching group members:', groupError);
+        toast.error('Failed to fetch group members');
+        return;
+      }
+
+      if (groupMembers) {
+        const contactIds = groupMembers.map((gm) => gm.contact_id);
+        recipientList = contacts.filter(
+          (c) => contactIds.includes(c.id) && c.status === "active"
+        );
+      }
+    }
+
+    console.log(`✅ Built recipient list: ${recipientList.length} recipients`);
+
+    if (recipientList.length === 0) {
+      console.log('❌ No active recipients found');
+      toast.error("No active recipients found for this campaign");
+      return;
+    }
+
+    // Step 2: Validate campaign content
+    const campaignHtml = (campaign as any).custom_html || (campaign as any).content?.html;
+    console.log('📄 Campaign HTML exists:', !!campaignHtml);
+    console.log('📧 Campaign subject:', campaign.subject);
+
+    if (!campaign.subject?.trim()) {
+      console.log('❌ Campaign subject is missing');
+      toast.error("Campaign subject is missing");
+      return;
+    }
+
+    if (!campaignHtml?.trim()) {
+      console.log('❌ Campaign content is missing');
+      toast.error("Campaign content is missing");
+      return;
+    }
+
+    // Step 3: Confirmation dialog
+    const confirmMessage = 
+      `📧 Send Campaign Confirmation\n\n` +
+      `Campaign: "${campaign.name}"\n` +
+      `Subject: "${campaign.subject}"\n` +
+      `Recipients: ${recipientList.length} contact${recipientList.length !== 1 ? 's' : ''}\n` +
+      `Mode: ${storedRecipients.sendToMode}\n\n` +
+      `This will send emails immediately. This action cannot be undone.\n\nContinue?`;
+    
+    if (!confirm(confirmMessage)) {
+      console.log('❌ User cancelled send');
+      return;
+    }
+
+    console.log('✅ User confirmed send, starting process...');
+
+    // Step 4: Start sending process
+    setSending(campaign.id);
+    const toastId = toast.loading(`Preparing to send to ${recipientList.length} recipient${recipientList.length !== 1 ? 's' : ''}...`);
+
+    // Update campaign status to sending immediately
+    const { error: statusError } = await supabase
+      .from("campaigns")
+      .update({
+        status: "sending",
+        sent_at: new Date().toISOString(),
+      })
+      .eq("id", campaign.id);
+
+    if (statusError) {
+      console.error('❌ Failed to update campaign status:', statusError);
+      toast.error('Failed to update campaign status', { id: toastId });
+      setSending(null);
+      return;
+    }
+
+    console.log('✅ Campaign status updated to sending');
+
     let successCount = 0;
     let failCount = 0;
 
     // Extract sending domain ID from campaign
     const sendingDomainId = (campaign as any).content?.sending_domain_id || null;
+    console.log('🌐 Sending domain ID:', sendingDomainId);
 
     // Step 5: Send to each recipient
-    for (const recipient of recipientList) {
+    for (let i = 0; i < recipientList.length; i++) {
+      const recipient = recipientList[i];
+      console.log(`📧 Sending to recipient ${i + 1}/${recipientList.length}: ${recipient.email}`);
+
       try {
         // Personalize HTML content
         let personalizedHtml = campaignHtml
@@ -348,7 +396,7 @@ const handleSendNow = async (campaign: Campaign) => {
           .replace(/\{\{email\}\}/gi, recipient.email || '');
 
         // Call send-email edge function
-        const { error: sendError } = await supabase.functions.invoke(
+        const { data: sendData, error: sendError } = await supabase.functions.invoke(
           "send-email",
           {
             body: {
@@ -370,52 +418,82 @@ const handleSendNow = async (campaign: Campaign) => {
         );
 
         if (sendError) {
-          console.error(`Failed to send to ${recipient.email}:`, sendError);
+          console.error(`❌ Failed to send to ${recipient.email}:`, sendError);
           failCount++;
         } else {
+          console.log(`✅ Successfully sent to ${recipient.email}`, sendData);
           successCount++;
         }
 
-        // Update progress toast
-        toast.loading(
-          `Sending... ${successCount + failCount}/${recipientList.length}`,
-          { id: toastId }
-        );
+        // Update progress toast every 5 emails or on last email
+        if ((i + 1) % 5 === 0 || i === recipientList.length - 1) {
+          toast.loading(
+            `Sending... ${successCount + failCount}/${recipientList.length} (${successCount} successful)`,
+            { id: toastId }
+          );
+        }
 
-      } catch (error) {
-        console.error(`Error sending to ${recipient.email}:`, error);
+      } catch (error: any) {
+        console.error(`❌ Exception sending to ${recipient.email}:`, error);
         failCount++;
       }
     }
 
-    // Step 6: Update campaign status
+    console.log(`📊 Sending complete: ${successCount} successful, ${failCount} failed`);
+
+    // Step 6: Update campaign final status
     const { error: updateError } = await supabase
       .from("campaigns")
       .update({
         status: "sent",
-        sent_at: new Date().toISOString(),
         recipients_count: recipientList.length,
       })
       .eq("id", campaign.id);
 
     if (updateError) {
-      console.error("Failed to update campaign status:", updateError);
+      console.error("❌ Failed to update campaign final status:", updateError);
+    } else {
+      console.log("✅ Campaign status updated to sent");
     }
 
     // Step 7: Show final result
-    toast.success(
-      `Campaign sent! ${successCount} successful${failCount > 0 ? `, ${failCount} failed` : ''}`,
-      { id: toastId }
-    );
+    if (failCount === 0) {
+      toast.success(
+        `✅ Campaign sent successfully to all ${successCount} recipients!`,
+        { id: toastId, duration: 5000 }
+      );
+    } else if (successCount > 0) {
+      toast.success(
+        `⚠️ Campaign sent to ${successCount} recipients, ${failCount} failed`,
+        { id: toastId, duration: 5000 }
+      );
+    } else {
+      toast.error(
+        `❌ Campaign failed to send. All ${failCount} attempts failed.`,
+        { id: toastId, duration: 5000 }
+      );
+    }
 
     // Refresh campaigns list
-    fetchCampaigns();
+    console.log('🔄 Refreshing campaigns list...');
+    await fetchCampaigns();
 
   } catch (error: any) {
-    console.error("Failed to send campaign:", error);
-    toast.error(error.message || "Failed to send campaign", { id: toastId });
+    console.error("💥 Critical error in handleQuickSend:", error);
+    toast.error(error.message || "Failed to send campaign");
+    
+    // Try to update campaign status to failed
+    try {
+      await supabase
+        .from("campaigns")
+        .update({ status: "draft" })
+        .eq("id", campaign.id);
+    } catch (e) {
+      console.error("Failed to revert campaign status:", e);
+    }
   } finally {
     setSending(null);
+    console.log('✅ handleQuickSend completed');
   }
 };
 
