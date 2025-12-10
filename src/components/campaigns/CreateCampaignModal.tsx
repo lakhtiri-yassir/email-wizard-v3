@@ -1049,9 +1049,13 @@ function Step2TemplateSelection({
   errors,
   updateField,
   userPlan,
+  allTemplates,
+  loadingTemplates,
 }: {
   formData: CampaignFormData;
   errors: Record<string, string>;
+  allTemplates: any[];
+  loadingTemplates: boolean;
   updateField: (field: keyof CampaignFormData, value: any) => void;
   userPlan: string;
 }) {
