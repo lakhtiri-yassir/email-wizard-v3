@@ -253,60 +253,89 @@ const handleSendNow = async (campaign: Campaign) => {
   };
 
   const handleOpenSendModal = (campaign: Campaign) => {
-    setSelectedCampaign(campaign);
+  setSelectedCampaign(campaign);
 
-    const storedRecipients = (campaign as any).content?.recipients;
-    if (storedRecipients) {
-      setSendMode(storedRecipients.sendToMode || "all");
-      setSelectedGroups(new Set(storedRecipients.selectedGroups || []));
-      setSelectedContacts(new Set(storedRecipients.selectedContacts || []));
-    } else {
-      setSendMode("all");
-      setSelectedContacts(new Set());
-      setSelectedGroups(new Set());
+  // ✅ FIX #2: Load saved recipients from campaign.content
+  const storedRecipients = (campaign as any).content?.recipients;
+  
+  if (storedRecipients) {
+    // Pre-populate the saved recipient selection
+    setSendMode(storedRecipients.sendToMode || "all");
+    setSelectedGroups(new Set(storedRecipients.selectedGroups || []));
+    setSelectedContacts(new Set(storedRecipients.selectedContacts || []));
+    
+    // Calculate and show recipient count
+    let count = 0;
+    if (storedRecipients.sendToMode === 'all') {
+      count = contacts.filter(c => c.status === 'active').length;
+    } else if (storedRecipients.sendToMode === 'contacts') {
+      count = storedRecipients.selectedContacts?.length || 0;
+    } else if (storedRecipients.sendToMode === 'groups') {
+      const groupIds = storedRecipients.selectedGroups || [];
+      count = groups
+        .filter(g => groupIds.includes(g.id))
+        .reduce((sum, g) => sum + g.contact_count, 0);
     }
+    
+    toast.success(`Recipients loaded: ${count} contacts (${storedRecipients.sendToMode} mode)`);
+  } else {
+    // Fallback to default (all contacts)
+    setSendMode("all");
+    setSelectedGroups(new Set());
+    setSelectedContacts(new Set());
+    toast.info('No saved recipients found. Please select recipients.');
+  }
 
-    setShowSendModal(true);
-  };
+  setShowSendModal(true);
+};
 
   const handleQuickSend = async (campaign: Campaign) => {
-    const storedRecipients = (campaign as any).content?.recipients;
-    if (!storedRecipients) {
-      handleOpenSendModal(campaign);
-      return;
-    }
+  const storedRecipients = (campaign as any).content?.recipients;
+  if (!storedRecipients) {
+    handleOpenSendModal(campaign);
+    return;
+  }
 
-    setSelectedCampaign(campaign);
+  setSelectedCampaign(campaign);
 
-    let recipientList: Contact[] = [];
+  let recipientList: Contact[] = [];
 
-    if (storedRecipients.sendToMode === 'all') {
-      recipientList = contacts.filter((c) => c.status === "active");
-    } else if (storedRecipients.sendToMode === 'contacts') {
+  if (storedRecipients.sendToMode === 'all') {
+    recipientList = contacts.filter((c) => c.status === "active");
+  } else if (storedRecipients.sendToMode === 'contacts') {
+    recipientList = contacts.filter(
+      (c) => storedRecipients.selectedContacts.includes(c.id) && c.status === "active"
+    );
+  } else if (storedRecipients.sendToMode === 'groups') {
+    const { data: groupMembers } = await supabase
+      .from("contact_group_members")
+      .select("contact_id")
+      .in("group_id", storedRecipients.selectedGroups);
+
+    if (groupMembers) {
+      const contactIds = groupMembers.map((gm) => gm.contact_id);
       recipientList = contacts.filter(
-        (c) => storedRecipients.selectedContacts.includes(c.id) && c.status === "active"
+        (c) => contactIds.includes(c.id) && c.status === "active"
       );
-    } else if (storedRecipients.sendToMode === 'groups') {
-      const { data: groupMembers } = await supabase
-        .from("contact_group_members")
-        .select("contact_id")
-        .in("group_id", storedRecipients.selectedGroups);
-
-      if (groupMembers) {
-        const contactIds = groupMembers.map((gm) => gm.contact_id);
-        recipientList = contacts.filter(
-          (c) => contactIds.includes(c.id) && c.status === "active"
-        );
-      }
     }
+  }
 
-    if (recipientList.length === 0) {
-      toast.error("No recipients found for this campaign");
-      return;
-    }
+  if (recipientList.length === 0) {
+    toast.error("No active recipients found for this campaign");
+    return;
+  }
 
-    const confirmMessage = `Send "${campaign.name}" immediately to ${recipientList.length} recipient(s)?\n\nThis action cannot be undone.`;
-    if (!confirm(confirmMessage)) return;
+  // ✅ ENHANCED: Better confirmation message
+  const confirmMessage = 
+    `📧 Send Campaign Confirmation\n\n` +
+    `Campaign: "${campaign.name}"\n` +
+    `Subject: "${campaign.subject}"\n` +
+    `Recipients: ${recipientList.length} contact${recipientList.length !== 1 ? 's' : ''}\n` +
+    `Mode: ${storedRecipients.sendToMode}\n\n` +
+    `This will send emails immediately. This action cannot be undone.\n\nContinue?`;
+  
+  if (!confirm(confirmMessage)) return;
+
 
     const campaignHtml = (campaign as any).custom_html || (campaign as any).content?.html;
 
@@ -863,6 +892,24 @@ const handleSendNow = async (campaign: Campaign) => {
                               ? `Recipients: ${campaign.recipients_count || 0}`
                               : 'No recipients selected'}
                           </div>
+                          <div className="text-sm mb-2">
+      {(campaign as any).content?.recipients ? (
+        <div className="flex items-center gap-1 text-gray-600">
+          <Users size={14} className="text-purple" />
+          <span className="font-medium">
+            {campaign.recipients_count} recipient{campaign.recipients_count !== 1 ? 's' : ''}
+          </span>
+          <span className="text-gray-500">
+            ({(campaign as any).content.recipients.sendToMode})
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 text-yellow-600">
+          <AlertCircle size={14} />
+          <span className="text-xs">Recipients not configured</span>
+        </div>
+      )}
+    </div>
                           <div className="flex gap-2">
                             <Button
                               variant="secondary"
@@ -906,6 +953,31 @@ const handleSendNow = async (campaign: Campaign) => {
                               <>📅 {new Date(campaign.scheduled_at).toLocaleString()}</>
                             )}
                           </div>
+                          <div className="text-sm mb-2">
+      <div className="flex items-center gap-1 text-purple font-medium mb-1">
+        <Clock size={14} />
+        <span>Scheduled for:</span>
+      </div>
+      {campaign.scheduled_at && (
+        <div className="text-sm text-gray-700 ml-5">
+          <div className="font-semibold">
+            {new Date(campaign.scheduled_at).toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </div>
+          <div className="text-purple font-medium">
+            {new Date(campaign.scheduled_at).toLocaleTimeString('en-US', {
+              hour: 'numeric',
+              minute: '2-digit',
+              hour12: true
+            })}
+          </div>
+        </div>
+      )}
+    </div>
                           
                           {/* Action Buttons */}
                           <div className="flex gap-2">

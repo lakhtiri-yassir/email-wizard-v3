@@ -1285,21 +1285,36 @@ function Step4Schedule({
 }) {
   return (
     <div className="space-y-6">
+      {/* Header with visual indicator */}
       <div>
-        <h3 className="text-lg font-semibold mb-4">When would you like to send?</h3>
-        <p className="text-gray-600 text-sm mb-6">
+        <h3 className="text-lg font-semibold mb-2">When would you like to send?</h3>
+        <p className="text-gray-600 text-sm mb-4">
           Choose when this campaign should be sent.
         </p>
+        
+        {/* ✅ NEW: Info banner */}
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800">
+              <p className="font-medium mb-1">Campaign Delivery Options</p>
+              <p className="text-blue-700">
+                Send immediately, schedule for a specific time, or save as draft to send later.
+                Your recipient selection will be saved in all cases.
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Schedule Options */}
+      {/* Schedule Options with enhanced styling */}
       <div className="space-y-4">
-        {/* Send Now */}
-        <label className={`cursor-pointer ${
+        {/* Send Now - Enhanced with icon and better description */}
+        <label className={`cursor-pointer block ${
           formData.scheduleMode === 'now'
-            ? 'bg-purple/5 border-purple'
-            : 'bg-white border-gray-300 hover:border-gray-400'
-        } border-2 rounded-lg p-6 transition-all`}>
+            ? 'bg-purple/10 border-purple ring-2 ring-purple/20'
+            : 'bg-white border-gray-300 hover:border-gray-400 hover:shadow-sm'
+        } border-2 rounded-lg p-5 transition-all duration-200`}>
           <div className="flex items-start gap-4">
             <input
               type="radio"
@@ -1307,26 +1322,34 @@ function Step4Schedule({
               value="now"
               checked={formData.scheduleMode === 'now'}
               onChange={(e) => updateField('scheduleMode', e.target.value as 'now' | 'later' | 'draft')}
-              className="mt-1"
+              className="mt-1.5 w-4 h-4 text-purple focus:ring-purple"
             />
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <Mail size={20} className={formData.scheduleMode === 'now' ? 'text-purple' : 'text-gray-400'} />
-                <span className="font-semibold">Send Now</span>
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`p-2 rounded-lg ${
+                  formData.scheduleMode === 'now' ? 'bg-purple text-white' : 'bg-gray-100 text-gray-600'
+                }`}>
+                  <Mail size={20} />
+                </div>
+                <span className="font-semibold text-lg">Send Now</span>
+                <span className="ml-auto px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+                  Immediate
+                </span>
               </div>
-              <p className="text-sm text-gray-600">
-                Campaign will be prepared for immediate sending after creation
+              <p className="text-sm text-gray-600 ml-12">
+                Campaign will be queued for immediate delivery after creation. 
+                Sending typically begins within seconds.
               </p>
             </div>
           </div>
         </label>
 
-        {/* Schedule for Later */}
-        <label className={`cursor-pointer ${
+        {/* Schedule for Later - Enhanced */}
+        <label className={`cursor-pointer block ${
           formData.scheduleMode === 'later'
-            ? 'bg-purple/5 border-purple'
-            : 'bg-white border-gray-300 hover:border-gray-400'
-        } border-2 rounded-lg p-6 transition-all`}>
+            ? 'bg-purple/10 border-purple ring-2 ring-purple/20'
+            : 'bg-white border-gray-300 hover:border-gray-400 hover:shadow-sm'
+        } border-2 rounded-lg p-5 transition-all duration-200`}>
           <div className="flex items-start gap-4">
             <input
               type="radio"
@@ -1334,36 +1357,50 @@ function Step4Schedule({
               value="later"
               checked={formData.scheduleMode === 'later'}
               onChange={(e) => updateField('scheduleMode', e.target.value as 'now' | 'later' | 'draft')}
-              className="mt-1"
+              className="mt-1.5 w-4 h-4 text-purple focus:ring-purple"
             />
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <Clock size={20} className={formData.scheduleMode === 'later' ? 'text-purple' : 'text-gray-400'} />
-                <span className="font-semibold">Schedule for Later</span>
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`p-2 rounded-lg ${
+                  formData.scheduleMode === 'later' ? 'bg-purple text-white' : 'bg-gray-100 text-gray-600'
+                }`}>
+                  <Clock size={20} />
+                </div>
+                <span className="font-semibold text-lg">Schedule for Later</span>
+                <span className="ml-auto px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">
+                  Scheduled
+                </span>
               </div>
-              <p className="text-sm text-gray-600 mb-4">
-                Choose a specific date and time to send this campaign
+              <p className="text-sm text-gray-600 ml-12 mb-4">
+                Choose a specific date and time to automatically send this campaign.
+                Perfect for time-sensitive announcements.
               </p>
 
               {formData.scheduleMode === 'later' && (
-                <div className="grid grid-cols-2 gap-4 mt-4">
+                <div className="ml-12 grid grid-cols-2 gap-4 p-4 bg-purple/5 border border-purple/20 rounded-lg">
                   <div>
-                    <label className="block text-xs font-medium mb-1">Date</label>
+                    <label className="block text-xs font-medium mb-2 text-gray-700">
+                      Date
+                    </label>
                     <Input
                       type="date"
                       value={formData.scheduledDate}
                       onChange={(e) => updateField('scheduledDate', e.target.value)}
                       error={errors.scheduledDate}
                       min={new Date().toISOString().split('T')[0]}
+                      className="w-full"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1">Time</label>
+                    <label className="block text-xs font-medium mb-2 text-gray-700">
+                      Time
+                    </label>
                     <Input
                       type="time"
                       value={formData.scheduledTime}
                       onChange={(e) => updateField('scheduledTime', e.target.value)}
                       error={errors.scheduledTime}
+                      className="w-full"
                     />
                   </div>
                 </div>
@@ -1372,12 +1409,12 @@ function Step4Schedule({
           </div>
         </label>
 
-        {/* ✅ NEW: Keep as Draft Option */}
-        <label className={`cursor-pointer ${
+        {/* Keep as Draft - Enhanced */}
+        <label className={`cursor-pointer block ${
           formData.scheduleMode === 'draft'
-            ? 'bg-purple/5 border-purple'
-            : 'bg-white border-gray-300 hover:border-gray-400'
-        } border-2 rounded-lg p-6 transition-all`}>
+            ? 'bg-purple/10 border-purple ring-2 ring-purple/20'
+            : 'bg-white border-gray-300 hover:border-gray-400 hover:shadow-sm'
+        } border-2 rounded-lg p-5 transition-all duration-200`}>
           <div className="flex items-start gap-4">
             <input
               type="radio"
@@ -1385,15 +1422,23 @@ function Step4Schedule({
               value="draft"
               checked={formData.scheduleMode === 'draft'}
               onChange={(e) => updateField('scheduleMode', e.target.value as 'now' | 'later' | 'draft')}
-              className="mt-1"
+              className="mt-1.5 w-4 h-4 text-purple focus:ring-purple"
             />
             <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <FileText size={20} className={formData.scheduleMode === 'draft' ? 'text-purple' : 'text-gray-400'} />
-                <span className="font-semibold">Keep as Draft</span>
+              <div className="flex items-center gap-3 mb-2">
+                <div className={`p-2 rounded-lg ${
+                  formData.scheduleMode === 'draft' ? 'bg-purple text-white' : 'bg-gray-100 text-gray-600'
+                }`}>
+                  <FileText size={20} />
+                </div>
+                <span className="font-semibold text-lg">Keep as Draft</span>
+                <span className="ml-auto px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded-full">
+                  Not Sent
+                </span>
               </div>
-              <p className="text-sm text-gray-600">
-                Save campaign for later. You can send it anytime from the campaigns page.
+              <p className="text-sm text-gray-600 ml-12">
+                Save campaign for later review. You can edit, schedule, or send 
+                it anytime from the campaigns page. Recipients will be saved.
               </p>
             </div>
           </div>
