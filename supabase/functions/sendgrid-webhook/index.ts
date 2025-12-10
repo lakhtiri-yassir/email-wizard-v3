@@ -1,13 +1,15 @@
 /**
  * ============================================================================
- * Edge Function: SendGrid Webhook Handler (FINAL FIX)
+ * Edge Function: SendGrid Webhook Handler (FIXED VERSION)
  * ============================================================================
  * 
  * Purpose: Process SendGrid event webhooks with ECDSA P-256 signature verification
  * 
  * CRITICAL FIX:
+ * - Converts DER-encoded signatures (70-73 bytes) to raw format (64 bytes)
+ * - SendGrid sends signatures in DER/ASN.1 format
+ * - Web Crypto API requires raw format for verification
  * - The payload MUST be used EXACTLY as received (raw bytes)
- * - SendGrid includes trailing newlines in the signed payload
  * - DO NOT parse and re-stringify JSON before verification
  * - Verify FIRST with raw body, THEN parse JSON
  * 
@@ -37,6 +39,86 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-Twilio-Email-Event-Webhook-Signature, X-Twilio-Email-Event-Webhook-Timestamp'
 };
+
+/**
+ * ============================================================================
+ * DER SIGNATURE CONVERSION
+ * ============================================================================
+ */
+
+/**
+ * Convert DER-encoded ECDSA signature to raw format (R||S)
+ * 
+ * DER format (variable length 70-73 bytes for P-256):
+ *   0x30 [total-length] 0x02 [r-length] [r-bytes] 0x02 [s-length] [s-bytes]
+ * 
+ * Raw format (fixed 64 bytes for P-256):
+ *   [32-byte-r][32-byte-s]
+ * 
+ * Why this is needed:
+ * - SendGrid sends signatures in DER/ASN.1 format (industry standard)
+ * - Web Crypto API expects raw concatenated R||S format
+ * - Without conversion, signature verification will always fail
+ * 
+ * @param derSignature - DER-encoded signature bytes
+ * @returns Raw format signature (64 bytes for P-256)
+ */
+function derToRawSignature(derSignature: Uint8Array): Uint8Array {
+  // P-256 uses 32-byte integers for R and S
+  const coordinateLength = 32;
+  const rawSignatureLength = coordinateLength * 2; // 64 bytes total
+
+  // Parse DER structure
+  let offset = 0;
+
+  // Check DER SEQUENCE tag (0x30)
+  if (derSignature[offset++] !== 0x30) {
+    throw new Error('Invalid DER signature: missing SEQUENCE tag');
+  }
+
+  // Skip total length byte
+  offset++;
+
+  // Parse R value
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error('Invalid DER signature: missing INTEGER tag for R');
+  }
+
+  const rLength = derSignature[offset++];
+  let rBytes = derSignature.slice(offset, offset + rLength);
+  offset += rLength;
+
+  // Parse S value  
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error('Invalid DER signature: missing INTEGER tag for S');
+  }
+
+  const sLength = derSignature[offset++];
+  let sBytes = derSignature.slice(offset, offset + sLength);
+
+  // Remove leading zero bytes (DER padding for positive integers)
+  // DER adds 0x00 prefix if the high bit is set (to indicate positive number)
+  while (rBytes.length > coordinateLength && rBytes[0] === 0x00) {
+    rBytes = rBytes.slice(1);
+  }
+  while (sBytes.length > coordinateLength && sBytes[0] === 0x00) {
+    sBytes = sBytes.slice(1);
+  }
+
+  // Pad to coordinate length if needed (left-pad with zeros)
+  const paddedR = new Uint8Array(coordinateLength);
+  const paddedS = new Uint8Array(coordinateLength);
+
+  paddedR.set(rBytes, coordinateLength - rBytes.length);
+  paddedS.set(sBytes, coordinateLength - sBytes.length);
+
+  // Concatenate R and S into raw format
+  const rawSignature = new Uint8Array(rawSignatureLength);
+  rawSignature.set(paddedR, 0);
+  rawSignature.set(paddedS, coordinateLength);
+
+  return rawSignature;
+}
 
 /**
  * ============================================================================
@@ -75,10 +157,16 @@ async function importPublicKey(base64PublicKey: string): Promise<CryptoKey> {
 /**
  * Verify SendGrid webhook signature using ECDSA
  * 
- * CRITICAL: The payload MUST be the raw string exactly as received from SendGrid
- * Do NOT parse and re-stringify JSON - this changes the bytes and breaks verification
+ * CRITICAL FIXES:
+ * 1. Converts DER-encoded signature to raw format before verification
+ * 2. Uses raw payload string exactly as received from SendGrid
  * 
  * SendGrid signs: timestamp + raw_payload_string (including any trailing \n or \r\n)
+ * 
+ * @param signature - Base64-encoded DER signature from X-Twilio-Email-Event-Webhook-Signature header
+ * @param timestamp - Timestamp from X-Twilio-Email-Event-Webhook-Timestamp header
+ * @param rawPayload - Raw payload string exactly as received (DO NOT parse/re-stringify)
+ * @returns true if signature is valid, false otherwise
  */
 async function verifySendGridSignature(
   signature: string,
@@ -106,10 +194,13 @@ async function verifySendGridSignature(
     console.log(`- Payload last 20 chars (hex): ${Array.from(rawPayload.slice(-20)).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ')}`);
     console.log(`- Combined data length: ${data.length}`);
     
-    // Decode the signature from base64
-    const signatureBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    // Decode the DER signature from base64
+    const derSignatureBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    console.log(`- DER signature length: ${derSignatureBytes.length} bytes`);
     
-    console.log(`- Signature length: ${signatureBytes.length} bytes`);
+    // ✅ CRITICAL FIX: Convert DER to raw format (64 bytes for P-256)
+    const rawSignatureBytes = derToRawSignature(derSignatureBytes);
+    console.log(`- Raw signature length: ${rawSignatureBytes.length} bytes`);
     
     // Verify the signature using ECDSA with SHA-256
     const isValid = await crypto.subtle.verify(
@@ -118,7 +209,7 @@ async function verifySendGridSignature(
         hash: { name: 'SHA-256' }  // SendGrid uses SHA-256 hash
       },
       publicKey,
-      signatureBytes,
+      rawSignatureBytes,  // ✅ Now using raw format instead of DER!
       data
     );
     
@@ -206,15 +297,15 @@ async function processSendGridEvent(event: any, supabase: any) {
         break;
     }
 
-    console.log(`✅ Event processed successfully`);
-  } catch (error) {
-    console.error(`❌ Error processing event:`, error);
+    console.log(`✅ Processed ${eventType} event for ${email}`);
+  } catch (error: any) {
+    console.error(`❌ Error processing ${eventType} event:`, error.message);
     throw error;
   }
 }
 
 /**
- * Update campaign analytics for an event
+ * Update campaign analytics based on event type
  */
 async function updateCampaignAnalytics(
   campaignId: string,
@@ -222,166 +313,160 @@ async function updateCampaignAnalytics(
   eventType: string,
   supabase: any
 ) {
-  try {
-    // Insert or update campaign_analytics
-    const { error } = await supabase
-      .from('campaign_analytics')
-      .insert({
-        campaign_id: campaignId,
-        contact_id: contactId,
-        event_type: eventType,
-        created_at: new Date().toISOString()
-      });
+  // Map event types to campaign_recipients status
+  const statusMap: { [key: string]: string } = {
+    'delivered': 'delivered',
+    'open': 'opened',
+    'click': 'clicked',
+    'bounce': 'bounced',
+    'dropped': 'failed',
+    'spam_report': 'spam',
+    'unsubscribe': 'unsubscribed'
+  };
 
-    if (error) {
-      console.warn('⚠️  Analytics update warning:', error.message);
-    }
+  const status = statusMap[eventType];
+  if (!status) return;
 
-    // Update campaign statistics
-    const columnMap: Record<string, string> = {
-      'delivered': 'delivered_count',
-      'open': 'opened_count',
-      'click': 'clicked_count',
-      'bounce': 'bounced_count',
-      'spam_report': 'spam_count',
-      'unsubscribe': 'unsubscribed_count'
-    };
+  // Update campaign_recipients
+  const { error } = await supabase
+    .from('campaign_recipients')
+    .update({ status })
+    .eq('campaign_id', campaignId)
+    .eq('contact_id', contactId);
 
-    const column = columnMap[eventType];
-    if (column) {
-      await supabase.rpc('increment_campaign_stat', {
-        p_campaign_id: campaignId,
-        p_column: column
-      });
-    }
-  } catch (error) {
-    console.warn('⚠️  Analytics error (non-fatal):', error);
+  if (error) {
+    console.error('❌ Error updating campaign_recipients:', error);
+  }
+
+  // Update campaign statistics
+  const statField = `${eventType}_count`;
+  const { error: statsError } = await supabase.rpc('increment_campaign_stat', {
+    p_campaign_id: campaignId,
+    p_stat_field: statField
+  });
+
+  if (statsError) {
+    console.error('❌ Error updating campaign stats:', statsError);
   }
 }
 
 /**
- * Handle bounce/dropped events
+ * Handle bounce events - mark contact as bounced
  */
-async function handleBounce(contactId: string | null, reason: string, supabase: any) {
+async function handleBounce(contactId: string, reason: string, supabase: any) {
   if (!contactId) return;
 
-  try {
-    await supabase
-      .from('contacts')
-      .update({
-        status: 'bounced',
-        bounce_reason: reason,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', contactId);
-    
-    console.log(`📍 Contact ${contactId} marked as bounced`);
-  } catch (error) {
-    console.error('❌ Error updating contact bounce status:', error);
+  const { error } = await supabase
+    .from('contacts')
+    .update({
+      status: 'bounced',
+      bounce_reason: reason,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', contactId);
+
+  if (error) {
+    console.error('❌ Error marking contact as bounced:', error);
   }
 }
 
 /**
- * Handle spam report events
+ * Handle spam report events - mark contact as spam
  */
-async function handleSpamReport(contactId: string | null, supabase: any) {
+async function handleSpamReport(contactId: string, supabase: any) {
   if (!contactId) return;
 
-  try {
-    await supabase
-      .from('contacts')
-      .update({
-        status: 'complained',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', contactId);
-    
-    console.log(`⚠️  Contact ${contactId} marked as complained`);
-  } catch (error) {
-    console.error('❌ Error updating contact spam status:', error);
+  const { error } = await supabase
+    .from('contacts')
+    .update({
+      status: 'spam_complaint',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', contactId);
+
+  if (error) {
+    console.error('❌ Error marking contact as spam:', error);
   }
 }
 
 /**
- * Handle unsubscribe events
+ * Handle unsubscribe events - mark contact as unsubscribed
  */
-async function handleUnsubscribe(contactId: string | null, email: string, supabase: any) {
-  try {
-    if (contactId) {
-      await supabase
-        .from('contacts')
-        .update({
-          status: 'unsubscribed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', contactId);
-    } else {
-      // If no contact_id, try to find by email
-      await supabase
-        .from('contacts')
-        .update({
-          status: 'unsubscribed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('email', email);
-    }
-    
-    console.log(`🚫 Contact unsubscribed: ${email}`);
-  } catch (error) {
-    console.error('❌ Error updating contact unsubscribe status:', error);
+async function handleUnsubscribe(contactId: string, email: string, supabase: any) {
+  if (!contactId) return;
+
+  const { error } = await supabase
+    .from('contacts')
+    .update({
+      status: 'unsubscribed',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', contactId);
+
+  if (error) {
+    console.error('❌ Error marking contact as unsubscribed:', error);
   }
 }
 
 /**
- * Handle click events
+ * Handle click events - track link clicks
  */
 async function handleClick(
-  campaignId: string | null,
-  contactId: string | null,
+  campaignId: string,
+  contactId: string,
   url: string,
   supabase: any
 ) {
-  if (!campaignId || !url) return;
+  if (!campaignId || !contactId || !url) return;
 
-  try {
-    // Log the click
-    await supabase
-      .from('link_clicks')
-      .insert({
-        campaign_id: campaignId,
-        contact_id: contactId,
-        url: url,
-        clicked_at: new Date().toISOString()
-      });
-    
-    console.log(`🔗 Click tracked for URL: ${url}`);
-  } catch (error) {
-    console.warn('⚠️  Click tracking error (non-fatal):', error);
+  // Track individual link clicks for analytics
+  const { error } = await supabase
+    .from('link_clicks')
+    .insert({
+      campaign_id: campaignId,
+      contact_id: contactId,
+      url: url,
+      clicked_at: new Date().toISOString()
+    });
+
+  if (error && error.code !== '23505') { // Ignore duplicate key errors
+    console.error('❌ Error tracking link click:', error);
   }
 }
 
 /**
  * ============================================================================
- * MAIN WEBHOOK HANDLER
+ * MAIN HANDLER
  * ============================================================================
  */
 
-serve(async (req: Request) => {
+serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // Only accept POST requests
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed' }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 405
+      }
+    );
+  }
+
   try {
-    console.log('\n' + '='.repeat(80));
+    console.log('='.repeat(80));
     console.log('📨 SENDGRID WEBHOOK RECEIVED');
     console.log('='.repeat(80));
 
-    // Get SendGrid signature headers
-    const signature = req.headers.get('X-Twilio-Email-Event-Webhook-Signature');
-    const timestamp = req.headers.get('X-Twilio-Email-Event-Webhook-Timestamp');
-    
-    // ✅ CRITICAL FIX: Get raw body as string - DO NOT parse JSON yet!
+    // Get signature headers
+    const signature = req.headers.get('x-twilio-email-event-webhook-signature');
+    const timestamp = req.headers.get('x-twilio-email-event-webhook-timestamp');
+
+    // ✅ CRITICAL: Get raw body as string BEFORE any parsing
     // SendGrid signs the exact bytes including any trailing newlines
     const rawBody = await req.text();
     
