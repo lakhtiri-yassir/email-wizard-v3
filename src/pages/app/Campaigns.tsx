@@ -23,6 +23,7 @@ import {
   Edit2,
   Trash2,
   Play,
+  Users,
 } from "lucide-react";
 import { AppLayout } from "../../components/app/AppLayout";
 import { useAuth } from "../../contexts/AuthContext";
