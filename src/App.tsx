@@ -8,7 +8,7 @@ import { SignupPage } from './pages/SignupPage';
 import { Dashboard } from './pages/app/Dashboard';
 import { Contacts } from './pages/app/Contacts';
 import { Campaigns } from './pages/app/Campaigns';
-import { Templates } from './pages/app/Templates';
+import Templates from './pages/app/Templates';
 import TemplateEditor from './components/templates/TemplateEditor';
 import { Analytics } from './pages/app/Analytics';
 import { Settings } from './pages/app/Settings';
