@@ -254,6 +254,7 @@ async function processSendGridEvent(event: any, supabase: any) {
 
   try {
     // Insert into email_events table
+    // Note: Storing full event payload in metadata JSON column
     const { error: insertError } = await supabase
       .from('email_events')
       .insert({
@@ -261,10 +262,13 @@ async function processSendGridEvent(event: any, supabase: any) {
         contact_id: contact_id || null,
         email: email,
         event_type: eventType,
-        event_data: event,
-        url: url || null,
-        sendgrid_event_id: sg_message_id || null,
-        occurred_at: new Date(timestamp * 1000).toISOString()
+        timestamp: new Date(timestamp * 1000).toISOString(),
+        metadata: {
+          ...event,
+          // Add additional tracking fields for easier querying
+          url: url || null,
+          sendgrid_event_id: sg_message_id || null
+        }
       });
 
     if (insertError) {
