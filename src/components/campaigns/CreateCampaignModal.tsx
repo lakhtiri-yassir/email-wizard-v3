@@ -490,20 +490,30 @@ useEffect(() => {
         updateField('templateId', '');
         setCurrentStep(3);
       } else if (formData.inputMode === 'template') {
-        if (!formData.templateId) {
-          setErrors({ templateId: 'Please select a template' });
-          return;
-        }
-        // Navigate to template editor with campaign context
-        const params = new URLSearchParams({
-          template: formData.templateId,
-          createMode: 'true',
-          name: formData.name,
-          subject: formData.subject
-        });
-        navigate(`/app/template/editor?templateId=${formData.templateId}&returnToCampaign=true`);
-        return;
-      }
+  if (!formData.templateId) {
+    setErrors({ templateId: 'Please select a template' });
+    return;
+  }
+  
+  // ✅ FIX: Save campaign data to sessionStorage BEFORE navigating
+  const campaignDraft = {
+    step: 2,
+    formData: formData,
+    timestamp: Date.now()
+  };
+  
+  console.log('💾 Saving campaignDraft to sessionStorage:', campaignDraft);
+  sessionStorage.setItem('campaignDraft', JSON.stringify(campaignDraft));
+  
+  // Verify it was saved
+  const saved = sessionStorage.getItem('campaignDraft');
+  console.log('✅ CampaignDraft saved, verification:', saved ? 'Success' : 'Failed');
+  
+  // Navigate to template editor with campaign context
+  console.log('🔙 Navigating to template editor with templateId:', formData.templateId);
+  navigate(`/app/template/editor?templateId=${formData.templateId}&returnToCampaign=true`);
+  return;
+}
     } else if (currentStep === 3) {
       // Step 3 validation
       if (!validateStep(3)) {
