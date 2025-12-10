@@ -192,11 +192,14 @@ useEffect(() => {
 
         // Restore ALL form data with edited template
         const restoredFormData = {
-          ...draft.formData,
-          customHtml: template.html || template.content?.html || '',
-          templateId: template.templateId || draft.formData.templateId,
-          inputMode: 'custom' as const // ✅ Important: Set to custom since we now have HTML
-        };
+  ...draft.formData,
+  customHtml: template.html || template.content?.html || '',
+  templateId: template.templateId || draft.formData.templateId,
+  inputMode: 'custom' as const,
+  // ✅ FIX: Convert Arrays back to Sets
+  selectedGroups: new Set(draft.formData.selectedGroups || []),
+  selectedContacts: new Set(draft.formData.selectedContacts || [])
+};
 
         console.log('🔄 Restoring form data:', restoredFormData);
         
@@ -496,11 +499,20 @@ useEffect(() => {
   }
   
   // ✅ FIX: Save campaign data to sessionStorage BEFORE navigating
-  const campaignDraft = {
-    step: 2,
-    formData: formData,
-    timestamp: Date.now()
-  };
+ // When saving to sessionStorage, convert Sets to Arrays
+const campaignDraft = {
+  step: 2,
+  formData: {
+    ...formData,
+    // ✅ Convert Sets to Arrays for JSON serialization
+    selectedGroups: Array.from(formData.selectedGroups),
+    selectedContacts: Array.from(formData.selectedContacts)
+  },
+  timestamp: Date.now()
+};
+
+console.log('💾 Saving campaignDraft to sessionStorage:', campaignDraft);
+sessionStorage.setItem('campaignDraft', JSON.stringify(campaignDraft));
   
   console.log('💾 Saving campaignDraft to sessionStorage:', campaignDraft);
   sessionStorage.setItem('campaignDraft', JSON.stringify(campaignDraft));

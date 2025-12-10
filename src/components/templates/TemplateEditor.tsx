@@ -34,6 +34,7 @@ import type { Section } from './SectionEditor';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+import { EMAIL_TEMPLATES } from '../../data/emailTemplates';
 
 interface TemplateEditorProps {
   mode?: 'create' | 'edit';
@@ -91,13 +92,30 @@ export default function TemplateEditor({
   }, [templateId]);
 
   async function loadTemplate(id: string) {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('templates')
-        .select('*')
-        .eq('id', id)
-        .single();
+  try {
+    setLoading(true);
+    console.log('📥 Loading template:', id);
+    
+    // ✅ CHECK SYSTEM TEMPLATES FIRST
+    const systemTemplate = EMAIL_TEMPLATES.find((t) => t.id === id);
+    
+    if (systemTemplate) {
+      console.log('✅ Loaded system template:', systemTemplate.name);
+      setTemplateName(systemTemplate.name);
+      setTemplateCategory(systemTemplate.category || 'marketing');
+      setSections(systemTemplate.content?.sections || []);
+      setSettings(systemTemplate.content?.settings || DEFAULT_SETTINGS);
+      setLoading(false);
+      return;  // ← Exit early, don't query database
+    }
+
+    // Only query database if NOT a system template
+    console.log('📥 Loading user template from database...');
+    const { data, error } = await supabase
+      .from('templates')
+      .select('*')
+      .eq('id', id)  // ← Now only receives valid UUIDs
+      .single();
 
       if (error) throw error;
 
