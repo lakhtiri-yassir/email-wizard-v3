@@ -1,21 +1,24 @@
 /**
  * ============================================================================
- * Edge Function: Send Email
+ * Edge Function: SendGrid Webhook Handler (FINAL FIX)
  * ============================================================================
  * 
- * Purpose: Handle email sending via SendGrid with custom domain support
+ * Purpose: Process SendGrid event webhooks with ECDSA P-256 signature verification
  * 
- * Features:
- * - Campaign-specific domain selection
- * - Default domain fallback
- * - Shared domain fallback for users without custom domains
- * - Personalization field replacement
- * - Reply-to handling
- * - ✅ FIXED: Custom args for webhook tracking
+ * CRITICAL FIX:
+ * - The payload MUST be used EXACTLY as received (raw bytes)
+ * - SendGrid includes trailing newlines in the signed payload
+ * - DO NOT parse and re-stringify JSON before verification
+ * - Verify FIRST with raw body, THEN parse JSON
  * 
- * Dependencies:
- * - Supabase for database access
- * - SendGrid API for email delivery
+ * Security:
+ * - Uses Elliptic Curve Digital Signature Algorithm (ECDSA) with P-256 curve
+ * - Verifies webhook authenticity using SendGrid's public key
+ * - No Authorization header required (webhooks use signature instead)
+ * - Returns 401 for invalid signatures
+ * 
+ * Events Processed:
+ * - delivered, open, click, bounce, dropped, spam_report, unsubscribe
  * 
  * ============================================================================
  */
@@ -24,230 +27,342 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // Environment variables
-const SENDGRID_API_KEY = Deno.env.get('SENDGRID_API_KEY') || '';
+const SENDGRID_WEBHOOK_PUBLIC_KEY = Deno.env.get('SENDGRID_WEBHOOK_VERIFICATION_KEY') || '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-
-// Use correct verified sending domain from SendGrid
-const SHARED_SENDING_DOMAIN = 'mail.mailwizard.io';
 
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+  'Access-Control-Allow-Headers': 'Content-Type, X-Twilio-Email-Event-Webhook-Signature, X-Twilio-Email-Event-Webhook-Timestamp'
 };
 
 /**
  * ============================================================================
- * SENDER EMAIL HELPER FUNCTIONS
+ * ECDSA SIGNATURE VERIFICATION
  * ============================================================================
  */
 
 /**
- * Generates a username slug from email address or user metadata
+ * Convert base64 public key to CryptoKey for ECDSA verification
+ * SendGrid uses P-256 curve (also known as prime256v1 or secp256r1)
  */
-function generateUsername(userEmail: string, userMetadata: any): string {
-  // Try to get username from metadata first
-  if (userMetadata?.username) {
-    return userMetadata.username.toLowerCase().replace(/[^a-z0-9]/g, '');
-  }
-  // Extract username from email (part before @)
-  const emailUsername = userEmail.split('@')[0];
-  return emailUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-/**
- * Gets a specific domain by ID for the user
- * Returns domain details if verified, null otherwise
- */
-async function getDomainById(userId: string, domainId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('id', domainId)
-    .eq('verification_status', 'verified')
-    .single();
-
-  if (error || !data) {
-    console.log(`Domain ${domainId} not found or not verified for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found specified verified domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Gets user's default custom sending domain
- */
-async function getDefaultCustomDomain(userId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('verification_status', 'verified')
-    .eq('is_default', true)
-    .single();
-
-  if (error || !data) {
-    console.log(`No default domain found for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found default verified domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Gets any verified custom domain for the user
- */
-async function getAnyVerifiedCustomDomain(userId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('verification_status', 'verified')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error || !data) {
-    console.log(`No verified domains found for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found verified domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Determines sender email based on domain configuration
- * Priority order:
- * 1. Campaign-specified domain (if provided and verified)
- * 2. User's default domain (if verified)
- * 3. Any user verified domain
- * 4. Shared platform domain (fallback)
- */
-async function determineSenderEmail(
-  userId: string,
-  userEmail: string,
-  userMetadata: any,
-  requestedFromName: string | null,
-  campaignDomainId: string | null,
-  supabase: any
-) {
-  // Generate username for personalized sender
-  const username = generateUsername(userEmail, userMetadata);
-  
-  let customDomain = null;
-
-  // Priority 1: Use campaign-specified domain if provided
-  if (campaignDomainId) {
-    console.log(`🎯 Campaign requests specific domain: ${campaignDomainId}`);
-    customDomain = await getDomainById(userId, campaignDomainId, supabase);
-  }
-
-  // Priority 2: Use user's default domain
-  if (!customDomain) {
-    console.log(`🔍 Looking for user default domain...`);
-    customDomain = await getDefaultCustomDomain(userId, supabase);
-  }
-
-  // Priority 3: Use any verified domain
-  if (!customDomain) {
-    console.log(`🔍 Looking for any verified domain...`);
-    customDomain = await getAnyVerifiedCustomDomain(userId, supabase);
-  }
-
-  // Always construct email with username@domain pattern
-  if (customDomain) {
-    const fromEmail = `${username}@${customDomain.domain}`;
-    console.log(`📧 Using custom domain sender: ${fromEmail}`);
-    console.log(`🏷️  Custom domain: ${customDomain.domain}`);
+async function importPublicKey(base64PublicKey: string): Promise<CryptoKey> {
+  try {
+    // Decode base64 to raw bytes
+    const binaryDer = Uint8Array.from(atob(base64PublicKey), c => c.charCodeAt(0));
     
-    return {
-      email: fromEmail,
-      name: requestedFromName || userMetadata?.full_name || 'Mail Wizard',
-      domain: customDomain.domain,
-      isCustomDomain: true
-    };
-  } else {
-    // Fallback: Use shared verified domain with username prefix
-    const generatedEmail = `${username}@${SHARED_SENDING_DOMAIN}`;
-    console.log(`📧 Using shared domain sender: ${generatedEmail}`);
-    console.log(`📨 Replies will go to: ${userEmail}`);
+    // Import as ECDSA public key with P-256 curve
+    const publicKey = await crypto.subtle.importKey(
+      'spki',  // SubjectPublicKeyInfo format
+      binaryDer,
+      {
+        name: 'ECDSA',
+        namedCurve: 'P-256'  // SendGrid uses P-256 curve
+      },
+      true,
+      ['verify']
+    );
     
-    return {
-      email: generatedEmail,
-      name: requestedFromName || userMetadata?.full_name || 'Mail Wizard',
-      domain: SHARED_SENDING_DOMAIN,
-      isCustomDomain: false
-    };
+    return publicKey;
+  } catch (error) {
+    console.error('❌ Error importing public key:', error);
+    throw new Error('Failed to import SendGrid public key');
   }
 }
 
 /**
- * Replaces personalization fields in email content
- * Supports both old format {{field}} and new format {{MERGE:field}}
+ * Verify SendGrid webhook signature using ECDSA
+ * 
+ * CRITICAL: The payload MUST be the raw string exactly as received from SendGrid
+ * Do NOT parse and re-stringify JSON - this changes the bytes and breaks verification
+ * 
+ * SendGrid signs: timestamp + raw_payload_string (including any trailing \n or \r\n)
  */
-function replacePersonalizationFields(template: string, contact: any): string {
-  if (!template) return '';
+async function verifySendGridSignature(
+  signature: string,
+  timestamp: string,
+  rawPayload: string
+): Promise<boolean> {
+  if (!SENDGRID_WEBHOOK_PUBLIC_KEY) {
+    console.warn('⚠️  SENDGRID_WEBHOOK_VERIFICATION_KEY not set - skipping signature verification');
+    return true; // Allow in development, but warn
+  }
 
-  let processed = template;
+  try {
+    // Import the public key
+    const publicKey = await importPublicKey(SENDGRID_WEBHOOK_PUBLIC_KEY);
+    
+    // Create the data that was signed: timestamp + raw_payload
+    // IMPORTANT: Use the raw payload string exactly as received
+    const encoder = new TextEncoder();
+    const data = encoder.encode(timestamp + rawPayload);
+    
+    console.log('🔍 Verification details:');
+    console.log(`- Timestamp: "${timestamp}"`);
+    console.log(`- Payload length: ${rawPayload.length}`);
+    console.log(`- Payload first 100 chars: ${rawPayload.substring(0, 100)}`);
+    console.log(`- Payload last 20 chars (hex): ${Array.from(rawPayload.slice(-20)).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ')}`);
+    console.log(`- Combined data length: ${data.length}`);
+    
+    // Decode the signature from base64
+    const signatureBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    
+    console.log(`- Signature length: ${signatureBytes.length} bytes`);
+    
+    // Verify the signature using ECDSA with SHA-256
+    const isValid = await crypto.subtle.verify(
+      {
+        name: 'ECDSA',
+        hash: { name: 'SHA-256' }  // SendGrid uses SHA-256 hash
+      },
+      publicKey,
+      signatureBytes,
+      data
+    );
+    
+    if (!isValid) {
+      console.error('❌ Invalid webhook signature');
+      console.error('Expected signature components:');
+      console.error(`  - timestamp: "${timestamp}"`);
+      console.error(`  - payload length: ${rawPayload.length}`);
+    } else {
+      console.log('✅ Webhook signature verified successfully');
+    }
 
-  // New format: {{MERGE:field_name}}
-  processed = processed
-    .replace(/\{\{MERGE:first_name\}\}/gi, contact.first_name || '')
-    .replace(/\{\{MERGE:last_name\}\}/gi, contact.last_name || '')
-    .replace(/\{\{MERGE:email\}\}/gi, contact.email || '')
-    .replace(/\{\{MERGE:company\}\}/gi, contact.company || '')
-    .replace(/\{\{MERGE:role\}\}/gi, contact.role || '')
-    .replace(/\{\{MERGE:industry\}\}/gi, contact.industry || '');
-
-  // Old format: {{field}} (for backward compatibility)
-  processed = processed
-    .replace(/\{\{firstname\}\}/gi, contact.first_name || '')
-    .replace(/\{\{lastname\}\}/gi, contact.last_name || '')
-    .replace(/\{\{company\}\}/gi, contact.company || '')
-    .replace(/\{\{role\}\}/gi, contact.role || '')
-    .replace(/\{\{industry\}\}/gi, contact.industry || '')
-    .replace(/\{\{email\}\}/gi, contact.email || '');
-
-  return processed;
+    return isValid;
+  } catch (error) {
+    console.error('❌ Signature verification error:', error);
+    return false;
+  }
 }
 
 /**
- * Injects system links and variables into email template
+ * ============================================================================
+ * EVENT PROCESSING
+ * ============================================================================
  */
-function injectSystemLinks(
-  html: string,
+
+/**
+ * Process a single SendGrid event
+ */
+async function processSendGridEvent(event: any, supabase: any) {
+  const {
+    event: eventType,
+    email,
+    timestamp,
+    campaign_id,
+    contact_id,
+    url,
+    reason,
+    sg_message_id
+  } = event;
+
+  console.log(`📧 Processing ${eventType} event for ${email}`);
+
+  try {
+    // Insert into email_events table
+    const { error: insertError } = await supabase
+      .from('email_events')
+      .insert({
+        campaign_id: campaign_id || null,
+        contact_id: contact_id || null,
+        email: email,
+        event_type: eventType,
+        event_data: event,
+        url: url || null,
+        sendgrid_event_id: sg_message_id || null,
+        occurred_at: new Date(timestamp * 1000).toISOString()
+      });
+
+    if (insertError) {
+      console.error('❌ Error inserting event:', insertError);
+      throw insertError;
+    }
+
+    // Update campaign analytics if campaign_id exists
+    if (campaign_id && contact_id) {
+      await updateCampaignAnalytics(campaign_id, contact_id, eventType, supabase);
+    }
+
+    // Handle specific event types
+    switch (eventType) {
+      case 'bounce':
+      case 'dropped':
+        await handleBounce(contact_id, reason, supabase);
+        break;
+      
+      case 'spam_report':
+        await handleSpamReport(contact_id, supabase);
+        break;
+      
+      case 'unsubscribe':
+        await handleUnsubscribe(contact_id, email, supabase);
+        break;
+      
+      case 'click':
+        await handleClick(campaign_id, contact_id, url, supabase);
+        break;
+    }
+
+    console.log(`✅ Event processed successfully`);
+  } catch (error) {
+    console.error(`❌ Error processing event:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Update campaign analytics for an event
+ */
+async function updateCampaignAnalytics(
   campaignId: string,
   contactId: string,
-  recipientEmail: string,
-  fromEmail: string,
-  subject: string,
-  companyName: string
-): string {
-  const frontendUrl = Deno.env.get('FRONTEND_URL') || 'https://mailwizard.io';
+  eventType: string,
+  supabase: any
+) {
+  try {
+    // Insert or update campaign_analytics
+    const { error } = await supabase
+      .from('campaign_analytics')
+      .insert({
+        campaign_id: campaignId,
+        contact_id: contactId,
+        event_type: eventType,
+        created_at: new Date().toISOString()
+      });
 
-  // Generate system URLs
-  const unsubscribeUrl = `${frontendUrl}/unsubscribe?email=${encodeURIComponent(recipientEmail)}&campaign=${campaignId}&contact=${contactId}`;
-  const viewInBrowserUrl = `${frontendUrl}/email/view/${campaignId}/${contactId}`;
+    if (error) {
+      console.warn('⚠️  Analytics update warning:', error.message);
+    }
 
-  // Replace all system merge tags
-  return html
-    .replace(/\{\{UNSUBSCRIBE_URL\}\}/g, unsubscribeUrl)
-    .replace(/\{\{VIEW_IN_BROWSER_URL\}\}/g, viewInBrowserUrl)
-    .replace(/\{\{FROM_EMAIL\}\}/g, fromEmail)
-    .replace(/\{\{SUBJECT_LINE\}\}/g, subject)
-    .replace(/\{\{COMPANY_NAME\}\}/g, companyName);
+    // Update campaign statistics
+    const columnMap: Record<string, string> = {
+      'delivered': 'delivered_count',
+      'open': 'opened_count',
+      'click': 'clicked_count',
+      'bounce': 'bounced_count',
+      'spam_report': 'spam_count',
+      'unsubscribe': 'unsubscribed_count'
+    };
+
+    const column = columnMap[eventType];
+    if (column) {
+      await supabase.rpc('increment_campaign_stat', {
+        p_campaign_id: campaignId,
+        p_column: column
+      });
+    }
+  } catch (error) {
+    console.warn('⚠️  Analytics error (non-fatal):', error);
+  }
+}
+
+/**
+ * Handle bounce/dropped events
+ */
+async function handleBounce(contactId: string | null, reason: string, supabase: any) {
+  if (!contactId) return;
+
+  try {
+    await supabase
+      .from('contacts')
+      .update({
+        status: 'bounced',
+        bounce_reason: reason,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', contactId);
+    
+    console.log(`📍 Contact ${contactId} marked as bounced`);
+  } catch (error) {
+    console.error('❌ Error updating contact bounce status:', error);
+  }
+}
+
+/**
+ * Handle spam report events
+ */
+async function handleSpamReport(contactId: string | null, supabase: any) {
+  if (!contactId) return;
+
+  try {
+    await supabase
+      .from('contacts')
+      .update({
+        status: 'complained',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', contactId);
+    
+    console.log(`⚠️  Contact ${contactId} marked as complained`);
+  } catch (error) {
+    console.error('❌ Error updating contact spam status:', error);
+  }
+}
+
+/**
+ * Handle unsubscribe events
+ */
+async function handleUnsubscribe(contactId: string | null, email: string, supabase: any) {
+  try {
+    if (contactId) {
+      await supabase
+        .from('contacts')
+        .update({
+          status: 'unsubscribed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', contactId);
+    } else {
+      // If no contact_id, try to find by email
+      await supabase
+        .from('contacts')
+        .update({
+          status: 'unsubscribed',
+          updated_at: new Date().toISOString()
+        })
+        .eq('email', email);
+    }
+    
+    console.log(`🚫 Contact unsubscribed: ${email}`);
+  } catch (error) {
+    console.error('❌ Error updating contact unsubscribe status:', error);
+  }
+}
+
+/**
+ * Handle click events
+ */
+async function handleClick(
+  campaignId: string | null,
+  contactId: string | null,
+  url: string,
+  supabase: any
+) {
+  if (!campaignId || !url) return;
+
+  try {
+    // Log the click
+    await supabase
+      .from('link_clicks')
+      .insert({
+        campaign_id: campaignId,
+        contact_id: contactId,
+        url: url,
+        clicked_at: new Date().toISOString()
+      });
+    
+    console.log(`🔗 Click tracked for URL: ${url}`);
+  } catch (error) {
+    console.warn('⚠️  Click tracking error (non-fatal):', error);
+  }
 }
 
 /**
  * ============================================================================
- * MAIN SEND EMAIL FUNCTION
+ * MAIN WEBHOOK HANDLER
  * ============================================================================
  */
 
@@ -259,192 +374,89 @@ serve(async (req: Request) => {
 
   try {
     console.log('\n' + '='.repeat(80));
-    console.log('📧 EMAIL SEND REQUEST');
+    console.log('📨 SENDGRID WEBHOOK RECEIVED');
     console.log('='.repeat(80));
 
-    // Get authorization token
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      throw new Error('Missing authorization header');
+    // Get SendGrid signature headers
+    const signature = req.headers.get('X-Twilio-Email-Event-Webhook-Signature');
+    const timestamp = req.headers.get('X-Twilio-Email-Event-Webhook-Timestamp');
+    
+    // ✅ CRITICAL FIX: Get raw body as string - DO NOT parse JSON yet!
+    // SendGrid signs the exact bytes including any trailing newlines
+    const rawBody = await req.text();
+    
+    console.log('📋 Request details:');
+    console.log(`- Signature present: ${!!signature}`);
+    console.log(`- Timestamp: ${timestamp}`);
+    console.log(`- Payload size: ${rawBody.length} bytes`);
+    console.log(`- Payload ends with: ${JSON.stringify(rawBody.slice(-5))}`);
+    
+    // Verify ECDSA signature if headers are present
+    if (signature && timestamp) {
+      // ✅ Pass the RAW body string, not parsed JSON!
+      const isValid = await verifySendGridSignature(signature, timestamp, rawBody);
+      
+      if (!isValid) {
+        console.error('❌ Invalid webhook signature - rejecting request');
+        return new Response(
+          JSON.stringify({ error: 'Invalid signature' }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 401
+          }
+        );
+      }
+    } else {
+      console.warn('⚠️  No signature headers found');
+      if (SENDGRID_WEBHOOK_PUBLIC_KEY) {
+        // In production with key set, require signature
+        console.error('❌ Signature verification enabled but headers missing');
+        return new Response(
+          JSON.stringify({ error: 'Missing signature headers' }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 401
+          }
+        );
+      }
+      console.warn('⚠️  Proceeding without verification (not recommended for production)');
     }
 
-    // Parse request body
-    const body = await req.json();
-    const {
-      to,
-      subject,
-      html,
-      text,
-      from_name,
-      reply_to,
-      campaign_id,
-      contact_id,
-      sending_domain_id, // Domain ID from campaign
-      personalization = {}
-    } = body;
+    // ✅ NOW parse JSON AFTER signature verification passed
+    const events = JSON.parse(rawBody);
+    console.log(`📊 Received ${events.length} event(s)`);
 
-    console.log(`📨 To: ${to}`);
-    console.log(`📝 Subject: ${subject}`);
-    console.log(`🎯 Campaign ID: ${campaign_id || 'N/A'}`);
-    console.log(`👤 Contact ID: ${contact_id || 'N/A'}`);
-    console.log(`🌐 Requested Domain ID: ${sending_domain_id || 'N/A (will use default)'}`);
-
-    // Validate required fields
-    if (!to || !subject || !html) {
-      throw new Error('Missing required fields: to, subject, html');
-    }
-
-    // Create Supabase client
+    // Create Supabase client (using service role key - no user auth needed for webhooks)
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         persistSession: false,
         autoRefreshToken: false
-      },
-      global: {
-        headers: {
-          Authorization: authHeader
-        }
       }
     });
 
-    // Get user from token
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      throw new Error('Invalid authorization token');
-    }
-
-    console.log(`👤 User ID: ${user.id}`);
-    console.log(`📧 User Email: ${user.email}`);
-
-    // Get user metadata
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, username')
-      .eq('id', user.id)
-      .single();
-
-    // Determine sender email and name based on domain configuration
-    const senderInfo = await determineSenderEmail(
-      user.id,
-      user.email!,
-      profile,
-      from_name,
-      sending_domain_id,
-      supabase
+    // Process each event
+    const results = await Promise.allSettled(
+      events.map((event: any) => processSendGridEvent(event, supabase))
     );
 
-    console.log(`📤 Final Sender: ${senderInfo.name} <${senderInfo.email}>`);
-    console.log(`📨 Reply-To: ${reply_to || user.email}`);
-
-    // Personalize content if contact data provided
-    let personalizedHtml = html;
-    let personalizedSubject = subject;
-
-    if (Object.keys(personalization).length > 0) {
-      personalizedHtml = replacePersonalizationFields(html, personalization);
-      personalizedSubject = replacePersonalizationFields(subject, personalization);
-    }
-
-    // Inject system links and variables (unsubscribe, view in browser, etc.)
-    if (campaign_id && contact_id) {
-      const companyName = profile?.full_name || from_name || 'Mail Wizard';
-      personalizedHtml = injectSystemLinks(
-        personalizedHtml,
-        campaign_id,
-        contact_id,
-        to,
-        senderInfo.email,
-        personalizedSubject,
-        companyName
-      );
-    }
-
-    // ✅ FIX: Prepare SendGrid payload with custom_args for webhook tracking
-    const sendGridPayload: any = {
-      personalizations: [
-        {
-          to: [{ email: to }],
-          subject: personalizedSubject,
-          // ✅ ADD custom_args so SendGrid includes them in webhook events
-          ...(campaign_id && contact_id ? {
-            custom_args: {
-              campaign_id: campaign_id,
-              contact_id: contact_id
-            }
-          } : {})
-        }
-      ],
-      from: {
-        email: senderInfo.email,
-        name: senderInfo.name
-      },
-      reply_to: {
-        email: reply_to || user.email!
-      },
-      content: [
-        {
-          type: 'text/html',
-          value: personalizedHtml
-        }
-      ]
-    };
-
-    // Add plain text if provided
-    if (text) {
-      sendGridPayload.content.unshift({
-        type: 'text/plain',
-        value: replacePersonalizationFields(text, personalization)
-      });
-    }
-
-    // Send via SendGrid
-    console.log('🔮 Sending email via SendGrid...');
+    // Log results
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
     
-    const sendGridResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(sendGridPayload)
-    });
-
-    if (!sendGridResponse.ok) {
-      const errorText = await sendGridResponse.text();
-      console.error('❌ SendGrid error:', errorText);
-      throw new Error(`SendGrid error: ${errorText}`);
-    }
-
-    // Get message ID from response headers
-    const messageId = sendGridResponse.headers.get('x-message-id');
-    console.log(`✅ Email sent successfully! Message ID: ${messageId}`);
-
-    // Log email activity (optional)
-    if (campaign_id && contact_id) {
-      try {
-        await supabase
-          .from('campaign_analytics')
-          .insert({
-            campaign_id,
-            contact_id,
-            event_type: 'sent',
-            sendgrid_message_id: messageId,
-            created_at: new Date().toISOString()
-          });
-        console.log('📊 Activity logged');
-      } catch (logError) {
-        console.warn('⚠️  Failed to log activity:', logError);
-        // Don't fail the request if logging fails
-      }
+    console.log(`✅ Successfully processed: ${successful}`);
+    if (failed > 0) {
+      console.error(`❌ Failed to process: ${failed}`);
     }
 
     console.log('='.repeat(80) + '\n');
 
+    // Always return 200 to SendGrid (even if some events failed)
+    // This prevents SendGrid from retrying and creating duplicates
     return new Response(
       JSON.stringify({
         success: true,
-        message_id: messageId,
-        sender: senderInfo
+        processed: successful,
+        failed: failed
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -453,9 +465,10 @@ serve(async (req: Request) => {
     );
 
   } catch (error: any) {
-    console.error('❌ Error sending email:', error.message);
+    console.error('❌ Webhook processing error:', error.message);
     console.error('Stack:', error.stack);
     
+    // Still return 200 to prevent SendGrid retries
     return new Response(
       JSON.stringify({
         success: false,
@@ -463,7 +476,7 @@ serve(async (req: Request) => {
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 400
+        status: 200
       }
     );
   }
