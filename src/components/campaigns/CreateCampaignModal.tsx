@@ -31,7 +31,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { X, ChevronRight, ChevronLeft, Check, Mail, Users, Calendar, FileText, Loader2, Code, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { X, ChevronRight, ChevronLeft, Check, Mail, Users, Calendar, FileText, Loader2, Code, AlertCircle, CheckCircle, Clock, Lock } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1227,6 +1227,7 @@ function Step2TemplateSelection({
               );
             })}
           </div>
+          )}
 
           {errors.templateId && (
             <p className="text-sm text-red-600">{errors.templateId}</p>
