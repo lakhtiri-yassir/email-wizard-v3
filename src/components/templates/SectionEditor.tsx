@@ -245,6 +245,7 @@ export default function SectionEditor({ sections, onChange }: SectionEditorProps
                 Title <span className="text-red-500">*</span>
               </label>
               <Input
+                key={`title-${section.id}`}
                 type="text"
                 value={section.content.title || ''}
                 onChange={(e) =>
@@ -258,6 +259,7 @@ export default function SectionEditor({ sections, onChange }: SectionEditorProps
                 Subtitle <span className="text-gray-400">(Optional)</span>
               </label>
               <Input
+                key={`subtitle-${section.id}`}
                 type="text"
                 value={section.content.subtitle || ''}
                 onChange={(e) =>
@@ -277,6 +279,7 @@ export default function SectionEditor({ sections, onChange }: SectionEditorProps
                 Text Content <span className="text-red-500">*</span>
               </label>
               <textarea
+                key={`text-${section.id}`}
                 value={section.content.text || ''}
                 onChange={(e) =>
                   updateSectionContent(section.id, { text: e.target.value })

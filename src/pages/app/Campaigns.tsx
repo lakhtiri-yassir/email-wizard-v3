@@ -104,16 +104,43 @@ export function Campaigns() {
   const location = useLocation();
 
   // Add this useEffect in Campaigns component
+// In Campaigns.tsx - Replace the detection useEffect
+
 useEffect(() => {
+  console.log('🔍 Campaigns page mounted, checking for resumeCampaign flag');
+  
   const urlParams = new URLSearchParams(window.location.search);
   const resumeCampaign = urlParams.get('resumeCampaign');
   
+  console.log('🏷️ resumeCampaign parameter:', resumeCampaign);
+  
   if (resumeCampaign === 'true') {
-    // Open create campaign modal
-    setShowCreateModal(true);
+    console.log('✅ Detected return from template editor!');
     
-    // Clean up URL
+    // Check if data exists in sessionStorage
+    const campaignDraft = sessionStorage.getItem('campaignDraft');
+    const editedTemplate = sessionStorage.getItem('editedTemplate');
+    
+    console.log('📦 campaignDraft exists:', !!campaignDraft);
+    console.log('📦 editedTemplate exists:', !!editedTemplate);
+    
+    if (campaignDraft && editedTemplate) {
+      console.log('✅ Both data pieces found, reopening modal...');
+      setIsReturningFromTemplate(true);
+      
+      // Small delay to ensure state is set
+      setTimeout(() => {
+        setShowCreateModal(true);
+        console.log('✅ Modal opened');
+      }, 50);
+    } else {
+      console.warn('⚠️ Missing sessionStorage data, cannot restore');
+      toast.error('Campaign data was lost. Please start over.');
+    }
+    
+    // Clean up URL without page reload
     window.history.replaceState({}, document.title, window.location.pathname);
+    console.log('🧹 URL cleaned up');
   }
 }, []);
 

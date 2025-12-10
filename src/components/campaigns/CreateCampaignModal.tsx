@@ -170,36 +170,62 @@ export default function CreateCampaignModal({
     loadContactsAndGroups();
   }, []);
   // Add this near the top of the CreateCampaignModal function
+// In CreateCampaignModal.tsx - Replace the entire restoration useEffect
+
 useEffect(() => {
-  // Check if returning from template editor
-  const campaignDraft = sessionStorage.getItem('campaignDraft');
-  const editedTemplate = sessionStorage.getItem('editedTemplate');
-  
-  if (campaignDraft && editedTemplate) {
-    try {
-      const draft = JSON.parse(campaignDraft);
-      const template = JSON.parse(editedTemplate);
-      
-      // Restore campaign state
-      setFormData({
-        ...draft.formData,
-        customHtml: template.html || template.content?.html || ''
-      });
-      
-      // Move to step 3 (Recipients)
-      setCurrentStep(3);
-      
-      // Clean up sessionStorage
-      sessionStorage.removeItem('campaignDraft');
-      sessionStorage.removeItem('editedTemplate');
-      
-      toast.success('Template loaded! Now select recipients.');
-    } catch (error) {
-      console.error('Error restoring campaign draft:', error);
+  if (shouldLoadTemplate) {
+    console.log('🔄 shouldLoadTemplate flag detected');
+    
+    const campaignDraft = sessionStorage.getItem('campaignDraft');
+    const editedTemplate = sessionStorage.getItem('editedTemplate');
+
+    console.log('📦 campaignDraft:', campaignDraft ? 'Found' : 'Not found');
+    console.log('📦 editedTemplate:', editedTemplate ? 'Found' : 'Not found');
+
+    if (campaignDraft && editedTemplate) {
+      try {
+        const draft = JSON.parse(campaignDraft);
+        const template = JSON.parse(editedTemplate);
+
+        console.log('✅ Parsed draft:', draft);
+        console.log('✅ Parsed template:', template);
+
+        // Restore ALL form data with edited template
+        const restoredFormData = {
+          ...draft.formData,
+          customHtml: template.html || template.content?.html || '',
+          templateId: template.templateId || draft.formData.templateId,
+          inputMode: 'custom' as const // ✅ Important: Set to custom since we now have HTML
+        };
+
+        console.log('🔄 Restoring form data:', restoredFormData);
+        
+        setFormData(restoredFormData);
+
+        // Move to step 3 (Recipients) after a small delay
+        setTimeout(() => {
+          console.log('➡️ Advancing to Step 3');
+          setCurrentStep(3);
+          toast.success('✅ Template loaded! Now select recipients.');
+        }, 100);
+
+        // Clean up sessionStorage
+        sessionStorage.removeItem('campaignDraft');
+        sessionStorage.removeItem('editedTemplate');
+        
+        console.log('🧹 SessionStorage cleaned up');
+
+      } catch (error) {
+        console.error('❌ Error restoring campaign draft:', error);
+        toast.error('Failed to restore campaign. Please start over.');
+      }
+    } else {
+      console.warn('⚠️ Missing data in sessionStorage');
+      if (!campaignDraft) console.warn('  - campaignDraft is missing');
+      if (!editedTemplate) console.warn('  - editedTemplate is missing');
     }
   }
-}, []);
-
+}, [shouldLoadTemplate]);
   // Handle return from template editor
   useEffect(() => {
     if (shouldLoadTemplate && location.state?.completedTemplate) {

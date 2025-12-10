@@ -234,27 +234,45 @@ export default function TemplateEditor({
 
   // ✅ FIX: Handle save with campaign return flow
   async function handleSave() {
-    if (returnToCampaign) {
-      // Save to sessionStorage for campaign creation
-      const html = generateHTML();
-      const templateData = {
-        html: html,
-        content: {
-          sections: sections,
-          settings: settings,
-          html: html
-        },
-        templateId: templateId || existingTemplate?.id,
-        name: templateName
-      };
+  console.log('💾 Save button clicked');
+  console.log('🏷️ returnToCampaign:', returnToCampaign);
+  
+  if (returnToCampaign) {
+    console.log('🔄 Saving for campaign return flow');
+    
+    // Generate HTML from sections
+    const html = generateHTML();
+    
+    console.log('📄 Generated HTML length:', html.length);
+    console.log('📦 Sections count:', sections.length);
+    
+    // Save to sessionStorage for campaign creation
+    const templateData = {
+      html: html,
+      content: {
+        sections: sections,
+        settings: settings,
+        html: html
+      },
+      templateId: templateId || existingTemplate?.id,
+      name: templateName,
+      timestamp: Date.now()
+    };
 
-      sessionStorage.setItem('editedTemplate', JSON.stringify(templateData));
-      console.log('✅ Template saved to sessionStorage, returning to campaign creation...');
+    console.log('💾 Saving template data to sessionStorage:', templateData);
+    sessionStorage.setItem('editedTemplate', JSON.stringify(templateData));
+    
+    // Verify it was saved
+    const saved = sessionStorage.getItem('editedTemplate');
+    console.log('✅ Template saved, verification:', saved ? 'Success' : 'Failed');
 
-      // Navigate back to campaigns with resume flag
-      navigate('/app/campaigns?resumeCampaign=true');
-      return;
-    }
+    toast.success('Template saved! Returning to campaign...');
+
+    // Navigate back to campaigns with resume flag
+    console.log('🔙 Navigating to: /app/campaigns?resumeCampaign=true');
+    navigate('/app/campaigns?resumeCampaign=true');
+    return;
+  }
 
     // Normal save flow (save to database)
     if (!user) {
