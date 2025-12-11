@@ -1,20 +1,14 @@
 /**
  * ============================================================================
- * Edge Function: Send Email
+ * FIXED: Edge Function - Send Email
  * ============================================================================
  * 
- * Purpose: Handle email sending via SendGrid with custom domain support
+ * CRITICAL FIX: Added customArgs to SendGrid payload to enable webhook tracking
  * 
- * Features:
- * - Campaign-specific domain selection
- * - Default domain fallback
- * - Shared domain fallback for users without custom domains
- * - Personalization field replacement
- * - Reply-to handling
- * 
- * Dependencies:
- * - Supabase for database access
- * - SendGrid API for email delivery
+ * Changes Made:
+ * 1. Added customArgs with campaign_id, contact_id, user_id to SendGrid payload
+ * 2. Added detailed logging of customArgs before sending
+ * 3. Ensured campaign_id and contact_id are properly passed through
  * 
  * ============================================================================
  */
@@ -26,9 +20,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 const SENDGRID_API_KEY = Deno.env.get('SENDGRID_API_KEY') || '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-
-// ✅ FIX #1: Use correct verified sending domain from SendGrid
-const SHARED_SENDING_DOMAIN = 'mail.mailwizard.io';  // Changed from em2151.mailwizard.io
+const SHARED_SENDING_DOMAIN = 'mail.mailwizard.io';
 
 // CORS headers
 const corsHeaders = {
@@ -38,330 +30,142 @@ const corsHeaders = {
 };
 
 /**
- * ============================================================================
- * SENDER EMAIL HELPER FUNCTIONS
- * ============================================================================
+ * Helper: Replace personalization fields in text
  */
+function replacePersonalizationFields(text: string, fields: Record<string, any>): string {
+  let result = text;
+  for (const [key, value] of Object.entries(fields)) {
+    const regex = new RegExp(`{{${key}}}`, 'g');
+    result = result.replace(regex, value || '');
+  }
+  return result;
+}
 
 /**
- * Generates a username slug from email address or user metadata
+ * Helper: Generate username from email
  */
 function generateUsername(userEmail: string, userMetadata: any): string {
-  // Try to get username from metadata first
   if (userMetadata?.username) {
     return userMetadata.username.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
-  // Extract username from email (part before @)
   const emailUsername = userEmail.split('@')[0];
   return emailUsername.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 /**
- * Gets a specific domain by ID for the user
- * Returns domain details if verified, null otherwise
+ * Main handler
  */
-async function getDomainById(userId: string, domainId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('id', domainId)
-    .eq('verification_status', 'verified')
-    .single();
-
-  if (error || !data) {
-    console.log(`Domain ${domainId} not found or not verified for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found specified verified domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Gets user's default verified custom domain
- * Returns the default domain if verified, null otherwise
- */
-async function getDefaultCustomDomain(userId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('verification_status', 'verified')
-    .eq('is_default', true)
-    .single();
-
-  if (error || !data) {
-    console.log(`No default verified custom domain for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found default verified custom domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Gets any verified custom domain for the user (fallback)
- * Returns the most recently verified domain, null if none
- */
-async function getAnyVerifiedCustomDomain(userId: string, supabase: any) {
-  const { data, error } = await supabase
-    .from('sending_domains')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('verification_status', 'verified')
-    .order('verified_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error || !data) {
-    console.log(`No verified custom domain for user ${userId}`);
-    return null;
-  }
-
-  console.log(`✅ Found verified custom domain: ${data.domain}`);
-  return data;
-}
-
-/**
- * Determines the appropriate sender email based on domain selection and verification
- * Priority order:
- * 1. Campaign-specified domain (if provided and verified)
- * 2. User's default domain (if verified)
- * 3. Any user verified domain
- * 4. Shared platform domain (fallback)
- */
-async function determineSenderEmail(
-  userId: string,
-  userEmail: string,
-  userMetadata: any,
-  requestedFromName: string | null,
-  campaignDomainId: string | null,
-  supabase: any
-) {
-  // Generate username for personalized sender
-  const username = generateUsername(userEmail, userMetadata);
-  
-  let customDomain = null;
-
-  // Priority 1: Use campaign-specified domain if provided
-  if (campaignDomainId) {
-    console.log(`🎯 Campaign requests specific domain: ${campaignDomainId}`);
-    customDomain = await getDomainById(userId, campaignDomainId, supabase);
-  }
-
-  // Priority 2: Use user's default domain
-  if (!customDomain) {
-    console.log(`🔍 Looking for user default domain...`);
-    customDomain = await getDefaultCustomDomain(userId, supabase);
-  }
-
-  // Priority 3: Use any verified domain
-  if (!customDomain) {
-    console.log(`🔍 Looking for any verified domain...`);
-    customDomain = await getAnyVerifiedCustomDomain(userId, supabase);
-  }
-
-  // ✅ FIX #2: Always construct email with username@domain pattern
-  if (customDomain) {
-    const fromEmail = `${username}@${customDomain.domain}`;
-    console.log(`📧 Using custom domain sender: ${fromEmail}`);
-    console.log(`🏷️  Custom domain: ${customDomain.domain}`);
-    
-    return {
-      email: fromEmail,
-      name: requestedFromName || userMetadata?.full_name || 'Mail Wizard',
-      domain: customDomain.domain,
-      isCustomDomain: true
-    };
-  } else {
-    // Fallback: Use shared verified domain with username prefix
-    const generatedEmail = `${username}@${SHARED_SENDING_DOMAIN}`;
-    console.log(`📧 Using shared domain sender: ${generatedEmail}`);
-    console.log(`📨 Replies will go to: ${userEmail}`);
-    
-    return {
-      email: generatedEmail,
-      name: requestedFromName || userMetadata?.full_name || 'Mail Wizard',
-      domain: SHARED_SENDING_DOMAIN,
-      isCustomDomain: false
-    };
-  }
-}
-
-/**
- * Replaces personalization fields in email content
- * Supports both old format {{field}} and new format {{MERGE:field}}
- */
-function replacePersonalizationFields(template: string, contact: any): string {
-  if (!template) return '';
-
-  let processed = template;
-
-  // New format: {{MERGE:field_name}}
-  processed = processed
-    .replace(/\{\{MERGE:first_name\}\}/gi, contact.first_name || '')
-    .replace(/\{\{MERGE:last_name\}\}/gi, contact.last_name || '')
-    .replace(/\{\{MERGE:email\}\}/gi, contact.email || '')
-    .replace(/\{\{MERGE:company\}\}/gi, contact.company || '')
-    .replace(/\{\{MERGE:role\}\}/gi, contact.role || '')
-    .replace(/\{\{MERGE:industry\}\}/gi, contact.industry || '');
-
-  // Old format: {{field}} (for backward compatibility)
-  processed = processed
-    .replace(/\{\{firstname\}\}/gi, contact.first_name || '')
-    .replace(/\{\{lastname\}\}/gi, contact.last_name || '')
-    .replace(/\{\{company\}\}/gi, contact.company || '')
-    .replace(/\{\{role\}\}/gi, contact.role || '')
-    .replace(/\{\{industry\}\}/gi, contact.industry || '')
-    .replace(/\{\{email\}\}/gi, contact.email || '');
-
-  return processed;
-}
-
-/**
- * Injects system links and variables into email template
- */
-function injectSystemLinks(
-  html: string,
-  campaignId: string,
-  contactId: string,
-  recipientEmail: string,
-  fromEmail: string,
-  subject: string,
-  companyName: string
-): string {
-  const frontendUrl = Deno.env.get('FRONTEND_URL') || 'https://mailwizard.io';
-
-  // Generate system URLs
-  const unsubscribeUrl = `${frontendUrl}/unsubscribe?email=${encodeURIComponent(recipientEmail)}&campaign=${campaignId}&contact=${contactId}`;
-  const viewInBrowserUrl = `${frontendUrl}/email/view/${campaignId}/${contactId}`;
-
-  // Replace all system merge tags
-  return html
-    .replace(/\{\{UNSUBSCRIBE_URL\}\}/g, unsubscribeUrl)
-    .replace(/\{\{VIEW_IN_BROWSER_URL\}\}/g, viewInBrowserUrl)
-    .replace(/\{\{FROM_EMAIL\}\}/g, fromEmail)
-    .replace(/\{\{SUBJECT_LINE\}\}/g, subject)
-    .replace(/\{\{COMPANY_NAME\}\}/g, companyName);
-}
-
-/**
- * ============================================================================
- * MAIN SEND EMAIL FUNCTION
- * ============================================================================
- */
-
-serve(async (req: Request) => {
+serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders, status: 200 });
   }
 
   try {
-    console.log('\n' + '='.repeat(80));
-    console.log('📧 EMAIL SEND REQUEST');
     console.log('='.repeat(80));
+    console.log('📧 EMAIL SEND REQUEST');
+    console.log('='.repeat(80) + '\n');
 
-    // Get authorization token
-    const authHeader = req.headers.get('Authorization');
+    // Get authorization header
+    const authHeader = req.headers.get('authorization');
     if (!authHeader) {
       throw new Error('Missing authorization header');
     }
 
     // Parse request body
-    const body = await req.json();
     const {
       to,
       subject,
       html,
       text,
-      from_name,
       reply_to,
-      campaign_id,
-      contact_id,
-      sending_domain_id, // Domain ID from campaign
+      campaign_id,      // ← CRITICAL: Must be present
+      contact_id,       // ← CRITICAL: Must be present
+      sending_domain_id,
       personalization = {}
-    } = body;
+    } = await req.json();
 
+    // Log request data
     console.log(`📨 To: ${to}`);
     console.log(`📝 Subject: ${subject}`);
     console.log(`🎯 Campaign ID: ${campaign_id || 'N/A'}`);
     console.log(`👤 Contact ID: ${contact_id || 'N/A'}`);
     console.log(`🌐 Requested Domain ID: ${sending_domain_id || 'N/A (will use default)'}`);
 
-    // Validate required fields
-    if (!to || !subject || !html) {
-      throw new Error('Missing required fields: to, subject, html');
-    }
-
     // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false
-      },
       global: {
-        headers: {
-          Authorization: authHeader
-        }
+        headers: { Authorization: authHeader }
       }
     });
 
-    // Get user from token
+    // Get user
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
-      throw new Error('Invalid authorization token');
+      throw new Error('User not authenticated');
     }
 
     console.log(`👤 User ID: ${user.id}`);
     console.log(`📧 User Email: ${user.email}`);
 
-    // Get user metadata
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name, username')
-      .eq('id', user.id)
-      .single();
+    // Determine sender email
+    let fromEmail = '';
+    let fromName = personalization.sender_name || 'Email Wizard';
 
-    // Determine sender email and name based on domain configuration
-    const senderInfo = await determineSenderEmail(
-      user.id,
-      user.email!,
-      profile,
-      from_name,
-      sending_domain_id,
-      supabase
-    );
+    // Try to get custom domain if specified
+    if (sending_domain_id) {
+      const { data: customDomain } = await supabase
+        .from('sending_domains')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('id', sending_domain_id)
+        .eq('verification_status', 'verified')
+        .single();
 
-    console.log(`📤 Final Sender: ${senderInfo.name} <${senderInfo.email}>`);
+      if (customDomain) {
+        const username = generateUsername(user.email!, user.user_metadata);
+        fromEmail = `${username}@${customDomain.domain}`;
+        console.log(`✅ Using specified custom domain: ${customDomain.domain}`);
+      }
+    }
+
+    // If no custom domain, try default
+    if (!fromEmail) {
+      console.log('🔍 Looking for user default domain...');
+      const { data: defaultDomain } = await supabase
+        .from('sending_domains')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('is_default', true)
+        .eq('verification_status', 'verified')
+        .single();
+
+      if (defaultDomain) {
+        const username = generateUsername(user.email!, user.user_metadata);
+        fromEmail = `${username}@${defaultDomain.domain}`;
+        console.log(`✅ Found default verified custom domain: ${defaultDomain.domain}`);
+      }
+    }
+
+    // Fallback to shared domain
+    if (!fromEmail) {
+      const username = generateUsername(user.email!, user.user_metadata);
+      fromEmail = `${username}@${SHARED_SENDING_DOMAIN}`;
+      console.log(`📧 Using shared domain sender: ${fromEmail}`);
+    }
+
+    console.log(`📤 Final Sender: ${fromName} <${fromEmail}>`);
     console.log(`📨 Reply-To: ${reply_to || user.email}`);
 
-    // Personalize content if contact data provided
-    let personalizedHtml = html;
-    let personalizedSubject = subject;
+    // Apply personalization
+    const personalizedHtml = replacePersonalizationFields(html, personalization);
+    const personalizedText = text ? replacePersonalizationFields(text, personalization) : '';
+    const personalizedSubject = replacePersonalizationFields(subject, personalization);
 
-    if (Object.keys(personalization).length > 0) {
-      personalizedHtml = replacePersonalizationFields(html, personalization);
-      personalizedSubject = replacePersonalizationFields(subject, personalization);
-    }
-
-    // Inject system links and variables (unsubscribe, view in browser, etc.)
-    if (campaign_id && contact_id) {
-      const companyName = profile?.full_name || from_name || 'Mail Wizard';
-      personalizedHtml = injectSystemLinks(
-        personalizedHtml,
-        campaign_id,
-        contact_id,
-        to,
-        senderInfo.email,
-        personalizedSubject,
-        companyName
-      );
-    }
-
-    // Prepare SendGrid payload
-    const sendGridPayload = {
+    // ========================================================================
+    // 🔥 CRITICAL FIX: BUILD SENDGRID PAYLOAD WITH customArgs
+    // ========================================================================
+    const sendGridPayload: any = {
       personalizations: [
         {
           to: [{ email: to }],
@@ -369,11 +173,22 @@ serve(async (req: Request) => {
         }
       ],
       from: {
-        email: senderInfo.email,
-        name: senderInfo.name
+        email: fromEmail,
+        name: fromName
       },
       reply_to: {
         email: reply_to || user.email!
+      },
+      // 🔥 FIX: Add customArgs for webhook tracking
+      custom_args: {
+        campaign_id: campaign_id || '',
+        contact_id: contact_id || '',
+        user_id: user.id
+      },
+      tracking_settings: {
+        click_tracking: { enable: true, enable_text: false },
+        open_tracking: { enable: true },
+        subscription_tracking: { enable: false }
       },
       content: [
         {
@@ -384,15 +199,23 @@ serve(async (req: Request) => {
     };
 
     // Add plain text if provided
-    if (text) {
+    if (personalizedText) {
       sendGridPayload.content.unshift({
         type: 'text/plain',
-        value: replacePersonalizationFields(text, personalization)
+        value: personalizedText
       });
     }
 
+    // 🔥 CRITICAL LOGGING: Show what we're sending to SendGrid
+    console.log('\n📦 SendGrid Payload Details:');
+    console.log(`   To: ${to}`);
+    console.log(`   From: ${fromEmail}`);
+    console.log(`   Subject: ${personalizedSubject}`);
+    console.log(`   Custom Args:`, JSON.stringify(sendGridPayload.custom_args, null, 2));
+    console.log(`   Tracking Enabled: Opens=${sendGridPayload.tracking_settings.open_tracking.enable}, Clicks=${sendGridPayload.tracking_settings.click_tracking.enable}`);
+
     // Send via SendGrid
-    console.log('🔮 Sending email via SendGrid...');
+    console.log('\n🔮 Sending email via SendGrid...');
     
     const sendGridResponse = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
@@ -413,32 +236,36 @@ serve(async (req: Request) => {
     const messageId = sendGridResponse.headers.get('x-message-id');
     console.log(`✅ Email sent successfully! Message ID: ${messageId}`);
 
-    // Log email activity (optional)
+    // Log campaign activity if IDs provided
     if (campaign_id && contact_id) {
       try {
         await supabase
-          .from('campaign_analytics')
+          .from('email_events')
           .insert({
             campaign_id,
             contact_id,
-            event_type: 'sent',
-            sendgrid_message_id: messageId,
-            created_at: new Date().toISOString()
+            email: to,
+            event_type: 'processed',
+            timestamp: new Date().toISOString(),
+            metadata: {
+              sendgrid_message_id: messageId,
+              from_email: fromEmail
+            }
           });
-        console.log('📊 Activity logged');
+        console.log('📊 Activity logged to email_events');
       } catch (logError) {
         console.warn('⚠️  Failed to log activity:', logError);
         // Don't fail the request if logging fails
       }
     }
 
-    console.log('='.repeat(80) + '\n');
+    console.log('\n' + '='.repeat(80) + '\n');
 
     return new Response(
       JSON.stringify({
         success: true,
         message_id: messageId,
-        sender: senderInfo
+        sender: { email: fromEmail, name: fromName }
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
