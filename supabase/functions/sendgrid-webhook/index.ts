@@ -1,19 +1,15 @@
 /**
  * ============================================================================
- * FIXED: SendGrid Webhook Handler
+ * FIXED: SendGrid Webhook Handler with ECDSA P-256 Verification
  * ============================================================================
  * 
- * CRITICAL FIX: Properly extract campaign_id and contact_id from webhook payload
+ * Purpose: Process SendGrid event webhooks with proper ECDSA signature verification
  * 
- * Changes Made:
- * 1. Check multiple possible locations for campaign_id (SendGrid transforms field names)
- * 2. Add comprehensive logging of event payload structure
- * 3. Add warnings when IDs are missing
- * 4. Ensure increment_campaign_stat is called correctly
- * 
- * SendGrid Field Name Transformation:
- * - customArgs.campaign_id → event.campaign_id OR event['campaign-id']
- * - customArgs.contact_id → event.contact_id OR event['contact-id']
+ * CRITICAL FEATURES:
+ * - Converts DER-encoded signatures to raw format (required for Web Crypto API)
+ * - Extracts campaign_id and contact_id from multiple possible locations
+ * - Updates campaign statistics in real-time
+ * - Comprehensive error logging for debugging
  * 
  * ============================================================================
  */
@@ -26,29 +22,163 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '
 const SENDGRID_WEBHOOK_VERIFICATION_KEY = Deno.env.get('SENDGRID_WEBHOOK_VERIFICATION_KEY') || '';
 
 /**
- * Verify SendGrid webhook signature
+ * ============================================================================
+ * DER SIGNATURE CONVERSION FUNCTIONS
+ * ============================================================================
+ */
+
+/**
+ * Convert DER-encoded ECDSA signature to raw format (R||S)
+ * 
+ * DER format: 0x30 [length] 0x02 [r-length] [r-bytes] 0x02 [s-length] [s-bytes]
+ * Raw format: [32-byte R][32-byte S] = 64 bytes for P-256
+ * 
+ * SendGrid sends DER format, Web Crypto API needs raw format
+ */
+function derToRawSignature(derSignature: Uint8Array): Uint8Array {
+  const coordinateLength = 32; // P-256 uses 32-byte coordinates
+  const rawSignatureLength = 64; // 32 bytes R + 32 bytes S
+
+  let offset = 0;
+
+  // Check SEQUENCE tag (0x30)
+  if (derSignature[offset++] !== 0x30) {
+    throw new Error('Invalid DER signature: missing SEQUENCE tag');
+  }
+
+  // Skip total length
+  offset++;
+
+  // Parse R value
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error('Invalid DER signature: missing INTEGER tag for R');
+  }
+
+  const rLength = derSignature[offset++];
+  let rBytes = derSignature.slice(offset, offset + rLength);
+  offset += rLength;
+
+  // Parse S value
+  if (derSignature[offset++] !== 0x02) {
+    throw new Error('Invalid DER signature: missing INTEGER tag for S');
+  }
+
+  const sLength = derSignature[offset++];
+  let sBytes = derSignature.slice(offset, offset + sLength);
+
+  // Remove leading zero bytes (DER padding)
+  while (rBytes.length > coordinateLength && rBytes[0] === 0x00) {
+    rBytes = rBytes.slice(1);
+  }
+  while (sBytes.length > coordinateLength && sBytes[0] === 0x00) {
+    sBytes = sBytes.slice(1);
+  }
+
+  // Pad to 32 bytes if needed
+  const paddedR = new Uint8Array(coordinateLength);
+  const paddedS = new Uint8Array(coordinateLength);
+  paddedR.set(rBytes, coordinateLength - rBytes.length);
+  paddedS.set(sBytes, coordinateLength - sBytes.length);
+
+  // Concatenate R and S
+  const rawSignature = new Uint8Array(rawSignatureLength);
+  rawSignature.set(paddedR, 0);
+  rawSignature.set(paddedS, coordinateLength);
+
+  return rawSignature;
+}
+
+/**
+ * ============================================================================
+ * ECDSA SIGNATURE VERIFICATION
+ * ============================================================================
+ */
+
+/**
+ * Import SendGrid's ECDSA P-256 public key
+ */
+async function importPublicKey(base64PublicKey: string): Promise<CryptoKey> {
+  try {
+    const binaryDer = Uint8Array.from(atob(base64PublicKey), c => c.charCodeAt(0));
+    
+    const publicKey = await crypto.subtle.importKey(
+      'spki',
+      binaryDer,
+      {
+        name: 'ECDSA',
+        namedCurve: 'P-256'
+      },
+      true,
+      ['verify']
+    );
+    
+    return publicKey;
+  } catch (error) {
+    console.error('❌ Error importing public key:', error);
+    throw new Error('Failed to import SendGrid public key');
+  }
+}
+
+/**
+ * Verify webhook signature using ECDSA P-256
  */
 async function verifyWebhookSignature(
   signature: string,
   timestamp: string,
-  payload: string
+  rawPayload: string
 ): Promise<boolean> {
+  if (!SENDGRID_WEBHOOK_VERIFICATION_KEY) {
+    console.warn('⚠️  No verification key set - skipping signature verification');
+    return true;
+  }
+
   try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(timestamp + payload);
+    console.log('🔐 Starting signature verification...');
     
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(SENDGRID_WEBHOOK_VERIFICATION_KEY),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
+    // Import public key
+    const publicKey = await importPublicKey(SENDGRID_WEBHOOK_VERIFICATION_KEY);
+    console.log('✅ Public key imported successfully');
+    
+    // Create signed data (timestamp + payload)
+    const encoder = new TextEncoder();
+    const data = encoder.encode(timestamp + rawPayload);
+    
+    console.log('🔍 Verification details:');
+    console.log(`   Timestamp: "${timestamp}"`);
+    console.log(`   Payload length: ${rawPayload.length} bytes`);
+    console.log(`   Payload first 100 chars: ${rawPayload.substring(0, 100)}`);
+    console.log(`   Combined data length: ${data.length} bytes`);
+    
+    // Decode DER signature
+    const derSignatureBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
+    console.log(`   DER signature length: ${derSignatureBytes.length} bytes`);
+    
+    // Convert DER to raw format
+    const rawSignatureBytes = derToRawSignature(derSignatureBytes);
+    console.log(`   Raw signature length: ${rawSignatureBytes.length} bytes`);
+    
+    // Verify signature
+    const isValid = await crypto.subtle.verify(
+      {
+        name: 'ECDSA',
+        hash: { name: 'SHA-256' }
+      },
+      publicKey,
+      rawSignatureBytes,
+      data
     );
     
-    const signatureBuffer = await crypto.subtle.sign('HMAC', key, data);
-    const expectedSignature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
-    
-    return signature === expectedSignature;
+    if (isValid) {
+      console.log('✅ Webhook signature verified successfully');
+    } else {
+      console.error('❌ Invalid webhook signature');
+      console.error('   Signature verification failed - possible causes:');
+      console.error('   1. Wrong public key');
+      console.error('   2. Payload modified in transit');
+      console.error('   3. Timestamp mismatch');
+    }
+
+    return isValid;
   } catch (error) {
     console.error('❌ Signature verification error:', error);
     return false;
@@ -56,11 +186,12 @@ async function verifyWebhookSignature(
 }
 
 /**
- * 🔥 CRITICAL FIX: Extract campaign_id from event with fallbacks
- * SendGrid may transform field names in different ways
+ * ============================================================================
+ * EVENT EXTRACTION HELPERS
+ * ============================================================================
  */
+
 function extractCampaignId(event: any): string | null {
-  // Try multiple possible locations
   const possibleLocations = [
     event.campaign_id,
     event['campaign-id'],
@@ -75,13 +206,9 @@ function extractCampaignId(event: any): string | null {
       return value;
     }
   }
-
   return null;
 }
 
-/**
- * 🔥 CRITICAL FIX: Extract contact_id from event with fallbacks
- */
 function extractContactId(event: any): string | null {
   const possibleLocations = [
     event.contact_id,
@@ -97,51 +224,42 @@ function extractContactId(event: any): string | null {
       return value;
     }
   }
-
   return null;
 }
 
 /**
- * Process a single SendGrid event
+ * ============================================================================
+ * EVENT PROCESSING
+ * ============================================================================
  */
+
 async function processSendGridEvent(event: any, supabase: any) {
   const eventType = event.event;
   const email = event.email;
   const timestamp = event.timestamp;
 
-  console.log(`📧 Processing ${eventType} event for ${email}`);
+  console.log(`\n📧 Processing ${eventType} event for ${email}`);
 
-  // 🔥 CRITICAL FIX: Extract IDs using helper functions
   const campaign_id = extractCampaignId(event);
   const contact_id = extractContactId(event);
 
-  // 🔥 DIAGNOSTIC LOGGING: Show full event structure
   console.log('🔍 Event Payload Analysis:');
   console.log(`   Event Type: ${eventType}`);
   console.log(`   Email: ${email}`);
-  console.log(`   Timestamp: ${timestamp}`);
-  console.log(`   Campaign ID: ${campaign_id || 'NOT FOUND'}`);
-  console.log(`   Contact ID: ${contact_id || 'NOT FOUND'}`);
+  console.log(`   Campaign ID: ${campaign_id || '❌ NOT FOUND'}`);
+  console.log(`   Contact ID: ${contact_id || '❌ NOT FOUND'}`);
   console.log(`   Available Keys: ${Object.keys(event).join(', ')}`);
 
-  // Warn if IDs are missing
   if (!campaign_id) {
-    console.warn(`⚠️  WARNING: No campaign_id found for ${eventType} event to ${email}`);
-    console.warn(`   This event will be inserted but not linked to a campaign`);
-    console.warn(`   Event object keys:`, Object.keys(event));
-  }
-
-  if (!contact_id) {
-    console.warn(`⚠️  WARNING: No contact_id found for ${eventType} event to ${email}`);
+    console.warn(`⚠️  No campaign_id found - event will not be linked to campaign`);
   }
 
   try {
-    // Convert timestamp to ISO string
     const eventTimestamp = timestamp 
       ? new Date(timestamp * 1000).toISOString() 
       : new Date().toISOString();
 
-    // Insert into email_events table
+    // Insert event
     const { data: insertedEvent, error: insertError } = await supabase
       .from('email_events')
       .insert({
@@ -161,43 +279,29 @@ async function processSendGridEvent(event: any, supabase: any) {
       .single();
 
     if (insertError) {
-      console.error('❌ ERROR inserting event into email_events:');
-      console.error('   Error code:', insertError.code);
-      console.error('   Error message:', insertError.message);
-      console.error('   Error details:', insertError.details);
+      console.error('❌ Insert error:', insertError.message);
       throw insertError;
     }
 
-    console.log(`✅ Event inserted successfully: ID ${insertedEvent.id}`);
+    console.log(`✅ Event inserted with ID: ${insertedEvent.id}`);
 
-    // Update campaign statistics if campaign_id exists
+    // Update campaign analytics
     if (campaign_id) {
       await updateCampaignAnalytics(campaign_id, contact_id, eventType, supabase);
-    } else {
-      console.log(`⏭️  Skipping campaign analytics update (no campaign_id)`);
     }
 
     // Handle specific event types
     switch (eventType) {
       case 'bounce':
       case 'dropped':
-        if (contact_id) {
-          await handleBounce(contact_id, event.reason, supabase);
-        }
+        if (contact_id) await handleBounce(contact_id, event.reason, supabase);
         break;
-      
       case 'spamreport':
-        if (contact_id) {
-          await handleSpamReport(contact_id, supabase);
-        }
+        if (contact_id) await handleSpamReport(contact_id, supabase);
         break;
-      
       case 'unsubscribe':
-        if (contact_id) {
-          await handleUnsubscribe(contact_id, email, supabase);
-        }
+        if (contact_id) await handleUnsubscribe(contact_id, email, supabase);
         break;
-      
       case 'click':
         if (campaign_id && contact_id && event.url) {
           await handleClick(campaign_id, contact_id, event.url, supabase);
@@ -205,29 +309,23 @@ async function processSendGridEvent(event: any, supabase: any) {
         break;
     }
 
-    console.log(`✅ Completed processing ${eventType} event for ${email}`);
+    console.log(`✅ Completed processing ${eventType} event`);
     return true;
 
   } catch (error: any) {
-    console.error(`❌ CRITICAL ERROR processing ${eventType} event:`, error.message);
-    console.error('   Stack trace:', error.stack);
+    console.error(`❌ Processing error:`, error.message);
     throw error;
   }
 }
 
-/**
- * Update campaign analytics
- */
 async function updateCampaignAnalytics(
   campaignId: string,
   contactId: string | null,
   eventType: string,
   supabase: any
 ) {
-  console.log(`📊 Updating campaign analytics for ${campaignId}`);
-  console.log(`   Event type: ${eventType}`);
+  console.log(`📊 Updating campaign ${campaignId.substring(0, 8)}... for ${eventType}`);
 
-  // Map event types to campaign stat fields
   const statFieldMap: { [key: string]: string } = {
     'delivered': 'recipients_count',
     'open': 'opens',
@@ -241,29 +339,24 @@ async function updateCampaignAnalytics(
   const statField = statFieldMap[eventType];
   
   if (!statField) {
-    console.log(`   ℹ️  Event type ${eventType} doesn't require stat update`);
+    console.log(`   ℹ️  No stat field for ${eventType}`);
     return;
   }
 
   try {
-    // Call the database function
     const { error: rpcError } = await supabase.rpc('increment_campaign_stat', {
       p_campaign_id: campaignId,
       p_stat_field: statField
     });
 
     if (rpcError) {
-      console.error('❌ ERROR calling increment_campaign_stat:');
-      console.error('   Error code:', rpcError.code);
-      console.error('   Error message:', rpcError.message);
-      console.error('   Campaign ID:', campaignId);
-      console.error('   Stat field:', statField);
+      console.error(`❌ RPC error:`, rpcError.message);
       throw rpcError;
     }
 
-    console.log(`✅ Successfully incremented ${statField} for campaign ${campaignId}`);
+    console.log(`✅ Incremented ${statField}`);
 
-    // Update contact engagement score
+    // Update contact engagement
     if (contactId) {
       const engagementPoints: { [key: string]: number } = {
         'open': 5,
@@ -276,85 +369,58 @@ async function updateCampaignAnalytics(
       const points = engagementPoints[eventType];
       
       if (points) {
-        const { error: engagementError } = await supabase.rpc('update_contact_engagement', {
+        await supabase.rpc('update_contact_engagement', {
           p_contact_id: contactId,
           p_points: points
         });
-
-        if (engagementError) {
-          console.error('⚠️  Failed to update contact engagement:', engagementError.message);
-          // Don't throw - engagement is non-critical
-        } else {
-          console.log(`✅ Updated contact engagement: ${points > 0 ? '+' : ''}${points} points`);
-        }
+        console.log(`✅ Contact engagement: ${points > 0 ? '+' : ''}${points}`);
       }
     }
   } catch (error: any) {
-    console.error(`❌ Error updating campaign analytics:`, error.message);
+    console.error(`❌ Analytics update error:`, error.message);
     throw error;
   }
 }
 
-/**
- * Handle bounce events
- */
 async function handleBounce(contactId: string, reason: string, supabase: any) {
   const { error } = await supabase
     .from('contacts')
-    .update({
-      status: 'bounced',
-      updated_at: new Date().toISOString()
-    })
+    .update({ status: 'bounced', updated_at: new Date().toISOString() })
     .eq('id', contactId);
 
   if (error) {
-    console.error('❌ Error marking contact as bounced:', error);
+    console.error('❌ Bounce update error:', error);
   } else {
-    console.log(`✅ Marked contact ${contactId} as bounced`);
+    console.log(`✅ Contact marked as bounced`);
   }
 }
 
-/**
- * Handle spam report events
- */
 async function handleSpamReport(contactId: string, supabase: any) {
   const { error } = await supabase
     .from('contacts')
-    .update({
-      status: 'complained',
-      updated_at: new Date().toISOString()
-    })
+    .update({ status: 'complained', updated_at: new Date().toISOString() })
     .eq('id', contactId);
 
   if (error) {
-    console.error('❌ Error marking contact as complained:', error);
+    console.error('❌ Spam report error:', error);
   } else {
-    console.log(`✅ Marked contact ${contactId} as complained`);
+    console.log(`✅ Contact marked as complained`);
   }
 }
 
-/**
- * Handle unsubscribe events
- */
 async function handleUnsubscribe(contactId: string, email: string, supabase: any) {
   const { error } = await supabase
     .from('contacts')
-    .update({
-      status: 'unsubscribed',
-      updated_at: new Date().toISOString()
-    })
+    .update({ status: 'unsubscribed', updated_at: new Date().toISOString() })
     .eq('id', contactId);
 
   if (error) {
-    console.error('❌ Error marking contact as unsubscribed:', error);
+    console.error('❌ Unsubscribe error:', error);
   } else {
-    console.log(`✅ Marked contact ${contactId} as unsubscribed`);
+    console.log(`✅ Contact unsubscribed`);
   }
 }
 
-/**
- * Handle click events
- */
 async function handleClick(
   campaignId: string,
   contactId: string,
@@ -370,52 +436,54 @@ async function handleClick(
       clicked_at: new Date().toISOString()
     });
 
-  if (error) {
-    console.error('❌ Error logging link click:', error);
-  } else {
-    console.log(`✅ Logged click for URL: ${url}`);
+  if (error && error.code !== '23505') {
+    console.error('❌ Click tracking error:', error);
+  } else if (!error) {
+    console.log(`✅ Click tracked: ${url.substring(0, 50)}...`);
   }
 }
 
 /**
- * Main handler
+ * ============================================================================
+ * MAIN HANDLER
+ * ============================================================================
  */
+
 serve(async (req) => {
-  console.log('='.repeat(80));
+  console.log('\n' + '='.repeat(80));
   console.log('📨 SENDGRID WEBHOOK RECEIVED');
   console.log('='.repeat(80));
 
   try {
-    // Get headers
     const signature = req.headers.get('x-twilio-email-event-webhook-signature');
     const timestamp = req.headers.get('x-twilio-email-event-webhook-timestamp');
-
-    // Read raw body for signature verification
     const rawBody = await req.text();
 
-    // Verify signature if configured
-    if (SENDGRID_WEBHOOK_VERIFICATION_KEY && signature && timestamp) {
-      console.log('🔐 Verifying webhook signature...');
+    console.log('📋 Request info:');
+    console.log(`   Signature present: ${!!signature}`);
+    console.log(`   Timestamp: ${timestamp}`);
+    console.log(`   Body size: ${rawBody.length} bytes`);
+
+    // Verify signature
+    if (signature && timestamp) {
       const isValid = await verifyWebhookSignature(signature, timestamp, rawBody);
       
       if (!isValid) {
-        console.error('❌ Invalid webhook signature');
+        console.error('❌ REJECTED: Invalid signature');
         return new Response('Unauthorized', { status: 401 });
       }
-      
-      console.log('✅ Webhook signature verified successfully');
     } else {
-      console.log('⚠️  Skipping signature verification (key not configured)');
+      console.warn('⚠️  No signature headers - skipping verification');
     }
 
     // Parse events
     const events = JSON.parse(rawBody);
-    console.log(`📊 Received ${events.length} event(s)\n`);
+    console.log(`\n📊 Received ${events.length} event(s)`);
 
     // Create Supabase client
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Process each event
+    // Process events
     let successCount = 0;
     let errorCount = 0;
 
@@ -424,22 +492,19 @@ serve(async (req) => {
         await processSendGridEvent(event, supabase);
         successCount++;
       } catch (error) {
-        console.error(`❌ Failed to process event:`, error);
+        console.error(`❌ Event processing failed:`, error);
         errorCount++;
       }
     }
 
     console.log('\n' + '='.repeat(80));
-    console.log(`✅ Successfully processed: ${successCount}`);
-    if (errorCount > 0) {
-      console.log(`❌ Failed: ${errorCount}`);
-    }
+    console.log(`✅ Success: ${successCount} | ❌ Failed: ${errorCount}`);
     console.log('='.repeat(80) + '\n');
 
     return new Response('OK', { status: 200 });
 
   } catch (error: any) {
-    console.error('❌ Webhook processing error:', error.message);
+    console.error('❌ Webhook handler error:', error.message);
     console.error('Stack:', error.stack);
     return new Response('Error', { status: 500 });
   }
