@@ -196,10 +196,6 @@ export default function Templates() {
               Create and manage your email templates
             </p>
           </div>
-
-          <Button variant="primary" icon={Plus} onClick={handleCreateNew}>
-            Create Template
-          </Button>
         </div>
 
         <div className="flex gap-4 mb-6">
