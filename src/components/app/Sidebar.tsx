@@ -56,7 +56,7 @@ export const Sidebar = ({ currentPath }: SidebarProps) => {
         <div className="mb-4">
           <Logo 
             variant="full" 
-            size="md"
+            size="lg"
             onClick={() => navigate('/app')}
           />
         </div>
