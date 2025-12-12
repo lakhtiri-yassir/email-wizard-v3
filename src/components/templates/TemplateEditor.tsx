@@ -92,30 +92,30 @@ export default function TemplateEditor({
   }, [templateId]);
 
   async function loadTemplate(id: string) {
-  try {
-    setLoading(true);
-    console.log('📥 Loading template:', id);
-    
-    // ✅ CHECK SYSTEM TEMPLATES FIRST
-    const systemTemplate = EMAIL_TEMPLATES.find((t) => t.id === id);
-    
-    if (systemTemplate) {
-      console.log('✅ Loaded system template:', systemTemplate.name);
-      setTemplateName(systemTemplate.name);
-      setTemplateCategory(systemTemplate.category || 'marketing');
-      setSections(systemTemplate.content?.sections || []);
-      setSettings(systemTemplate.content?.settings || DEFAULT_SETTINGS);
-      setLoading(false);
-      return;  // ← Exit early, don't query database
-    }
+    try {
+      setLoading(true);
+      console.log('📥 Loading template:', id);
+      
+      // ✅ CHECK SYSTEM TEMPLATES FIRST
+      const systemTemplate = EMAIL_TEMPLATES.find((t) => t.id === id);
+      
+      if (systemTemplate) {
+        console.log('✅ Loaded system template:', systemTemplate.name);
+        setTemplateName(systemTemplate.name);
+        setTemplateCategory(systemTemplate.category || 'marketing');
+        setSections(systemTemplate.content?.sections || []);
+        setSettings(systemTemplate.content?.settings || DEFAULT_SETTINGS);
+        setLoading(false);
+        return;  // ← Exit early, don't query database
+      }
 
-    // Only query database if NOT a system template
-    console.log('📥 Loading user template from database...');
-    const { data, error } = await supabase
-      .from('templates')
-      .select('*')
-      .eq('id', id)  // ← Now only receives valid UUIDs
-      .single();
+      // Only query database if NOT a system template
+      console.log('📥 Loading user template from database...');
+      const { data, error } = await supabase
+        .from('templates')
+        .select('*')
+        .eq('id', id)  // ← Now only receives valid UUIDs
+        .single();
 
       if (error) throw error;
 
@@ -144,7 +144,8 @@ export default function TemplateEditor({
                 <h1 style="margin: 0 0 10px 0; color: ${settings.textColor}; font-size: 32px; font-weight: bold; font-family: ${settings.fontFamily};">
                   ${section.content.title || ''}
                 </h1>
-                ${section.content.subtitle ? `
+                ${section.content.subtitle ?
+                  `
                   <p style="margin: 0; color: #666666; font-size: 18px; font-family: ${settings.fontFamily};">
                     ${section.content.subtitle}
                   </p>
@@ -212,7 +213,8 @@ export default function TemplateEditor({
                 <p style="margin: 0 0 10px 0; color: #666666; font-size: 14px; font-family: ${settings.fontFamily};">
                   ${section.content.companyName || settings.companyName}
                 </p>
-                ${section.content.address ? `
+                ${section.content.address ?
+                  `
                   <p style="margin: 0 0 10px 0; color: #666666; font-size: 12px; font-family: ${settings.fontFamily};">
                     ${section.content.address}
                   </p>
@@ -250,47 +252,47 @@ export default function TemplateEditor({
     `.trim();
   }
 
-  // ✅ FIX: Handle save with campaign return flow
+  // ✅ FIX: Handle save with proper template ID validation
   async function handleSave() {
-  console.log('💾 Save button clicked');
-  console.log('🏷️ returnToCampaign:', returnToCampaign);
-  
-  if (returnToCampaign) {
-    console.log('🔄 Saving for campaign return flow');
+    console.log('💾 Save button clicked');
+    console.log('🏷️ returnToCampaign:', returnToCampaign);
     
-    // Generate HTML from sections
-    const html = generateHTML();
-    
-    console.log('📄 Generated HTML length:', html.length);
-    console.log('📦 Sections count:', sections.length);
-    
-    // Save to sessionStorage for campaign creation
-    const templateData = {
-      html: html,
-      content: {
-        sections: sections,
-        settings: settings,
-        html: html
-      },
-      templateId: templateId || existingTemplate?.id,
-      name: templateName,
-      timestamp: Date.now()
-    };
+    if (returnToCampaign) {
+      console.log('🔄 Saving for campaign return flow');
+      
+      // Generate HTML from sections
+      const html = generateHTML();
+      
+      console.log('📄 Generated HTML length:', html.length);
+      console.log('📦 Sections count:', sections.length);
+      
+      // Save to sessionStorage for campaign creation
+      const templateData = {
+        html: html,
+        content: {
+          sections: sections,
+          settings: settings,
+          html: html
+        },
+        templateId: templateId || existingTemplate?.id,
+        name: templateName,
+        timestamp: Date.now()
+      };
 
-    console.log('💾 Saving template data to sessionStorage:', templateData);
-    sessionStorage.setItem('editedTemplate', JSON.stringify(templateData));
-    
-    // Verify it was saved
-    const saved = sessionStorage.getItem('editedTemplate');
-    console.log('✅ Template saved, verification:', saved ? 'Success' : 'Failed');
+      console.log('💾 Saving template data to sessionStorage:', templateData);
+      sessionStorage.setItem('editedTemplate', JSON.stringify(templateData));
+      
+      // Verify it was saved
+      const saved = sessionStorage.getItem('editedTemplate');
+      console.log('✅ Template saved, verification:', saved ? 'Success' : 'Failed');
 
-    toast.success('Template saved! Returning to campaign...');
+      toast.success('Template saved! Returning to campaign...');
 
-    // Navigate back to campaigns with resume flag
-    console.log('🔙 Navigating to: /app/campaigns?resumeCampaign=true');
-    navigate('/app/campaigns?resumeCampaign=true');
-    return;
-  }
+      // Navigate back to campaigns with resume flag
+      console.log('🔙 Navigating to: /app/campaigns?resumeCampaign=true');
+      navigate('/app/campaigns?resumeCampaign=true');
+      return;
+    }
 
     // Normal save flow (save to database)
     if (!user) {
@@ -312,7 +314,18 @@ export default function TemplateEditor({
         }
       };
 
-      if (mode === 'edit' && existingTemplate) {
+      // ✅ FIX: Determine if this is truly an edit or a create
+      // Only UPDATE if we have a valid UUID existingTemplate AND it's not a system template
+      const isValidEdit = 
+        mode === 'edit' && 
+        existingTemplate && 
+        existingTemplate.id && 
+        !existingTemplate.is_locked &&  // ← System templates are locked
+        existingTemplate.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);  // ← Valid UUID format
+
+      if (isValidEdit) {
+        // Update existing custom template
+        console.log('🔄 Updating existing template:', existingTemplate.id);
         const { error } = await supabase
           .from('templates')
           .update(templateData)
@@ -321,6 +334,8 @@ export default function TemplateEditor({
         if (error) throw error;
         toast.success('Template updated successfully!');
       } else {
+        // Create new custom template (including when editing system templates)
+        console.log('➕ Creating new template');
         const { error } = await supabase
           .from('templates')
           .insert([templateData]);
@@ -501,17 +516,18 @@ export default function TemplateEditor({
                 </div>
               </div>
 
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm font-medium mb-2">Font Family</label>
                 <select
                   value={settings.fontFamily}
                   onChange={(e) => setSettings({ ...settings, fontFamily: e.target.value })}
-                  className="w-full px-4 py-2 border-2 border-black rounded-lg"
+                  className="w-full px-4 py-2 border-2 border-black rounded-lg focus:outline-none focus:ring-2 focus:ring-purple"
                 >
                   <option value="'DM Sans', sans-serif">DM Sans</option>
+                  <option value="'DM Serif Display', serif">DM Serif Display</option>
                   <option value="Arial, sans-serif">Arial</option>
+                  <option value="'Georgia', serif">Georgia</option>
                   <option value="'Times New Roman', serif">Times New Roman</option>
-                  <option value="Georgia, serif">Georgia</option>
                   <option value="'Courier New', monospace">Courier New</option>
                 </select>
               </div>

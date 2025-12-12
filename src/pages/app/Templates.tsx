@@ -112,13 +112,16 @@ export default function Templates() {
   }
 
   function handleEditTemplate(template: Template) {
-    if (template.is_locked) {
-      toast.error('System templates cannot be edited. Creating a copy...');
-      handleDuplicateTemplate(template);
-    } else {
-      navigate(`/app/templates/edit/${template.id}`);
-    }
+  if (template.is_locked) {
+    // ✅ FIX: System templates should be duplicated, not edited
+    toast.info('Creating a copy of system template...');
+    handleDuplicateTemplate(template);
+    return;
   }
+
+  // Only navigate to edit for custom (unlocked) templates
+  navigate(`/app/templates/edit/${template.id}`);
+}
 
   function handleUseTemplate(template: Template) {
     // Navigate to editor with the template loaded
