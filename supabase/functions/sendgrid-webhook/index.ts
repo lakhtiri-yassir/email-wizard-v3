@@ -1,15 +1,13 @@
 /**
  * ============================================================================
- * FIXED: SendGrid Webhook Handler with ECDSA P-256 Verification
+ * SENDGRID WEBHOOK HANDLER - FINAL CORRECTED VERSION
  * ============================================================================
  * 
- * Purpose: Process SendGrid event webhooks with proper ECDSA signature verification
- * 
- * CRITICAL FEATURES:
- * - Converts DER-encoded signatures to raw format (required for Web Crypto API)
- * - Extracts campaign_id and contact_id from multiple possible locations
- * - Updates campaign statistics in real-time
- * - Comprehensive error logging for debugging
+ * CRITICAL FIXES IMPLEMENTED:
+ * 1. ✅ ECDSA P-256 signature verification (correct encryption from working code)
+ * 2. ✅ Separated recipients_count from delivered_count
+ * 3. ✅ Filter proxy-generated opens using 1-second delay after delivery
+ * 4. ✅ Store delivery timestamps for time-based filtering
  * 
  * ============================================================================
  */
@@ -90,7 +88,7 @@ function derToRawSignature(derSignature: Uint8Array): Uint8Array {
 
 /**
  * ============================================================================
- * ECDSA SIGNATURE VERIFICATION
+ * ECDSA SIGNATURE VERIFICATION (FROM WORKING CODE)
  * ============================================================================
  */
 
@@ -146,7 +144,6 @@ async function verifyWebhookSignature(
     console.log('🔍 Verification details:');
     console.log(`   Timestamp: "${timestamp}"`);
     console.log(`   Payload length: ${rawPayload.length} bytes`);
-    console.log(`   Payload first 100 chars: ${rawPayload.substring(0, 100)}`);
     console.log(`   Combined data length: ${data.length} bytes`);
     
     // Decode DER signature
@@ -229,105 +226,58 @@ function extractContactId(event: any): string | null {
 
 /**
  * ============================================================================
- * EVENT PROCESSING
+ * NEW: HANDLE DELIVERED EVENT - Store timestamp for open filtering
  * ============================================================================
  */
-
-async function processSendGridEvent(event: any, supabase: any) {
-  const eventType = event.event;
-  const email = event.email;
-  const timestamp = event.timestamp;
-
-  console.log(`\n📧 Processing ${eventType} event for ${email}`);
-
-  const campaign_id = extractCampaignId(event);
-  const contact_id = extractContactId(event);
-
-  console.log('🔍 Event Payload Analysis:');
-  console.log(`   Event Type: ${eventType}`);
-  console.log(`   Email: ${email}`);
-  console.log(`   Campaign ID: ${campaign_id || '❌ NOT FOUND'}`);
-  console.log(`   Contact ID: ${contact_id || '❌ NOT FOUND'}`);
-  console.log(`   Available Keys: ${Object.keys(event).join(', ')}`);
-
-  if (!campaign_id) {
-    console.warn(`⚠️  No campaign_id found - event will not be linked to campaign`);
-  }
-
+async function handleDelivered(
+  campaignId: string,
+  email: string,
+  timestamp: number,
+  supabase: any
+) {
+  console.log(`📬 Handling delivery for ${email} in campaign ${campaignId.substring(0, 8)}...`);
+  
   try {
-    const eventTimestamp = timestamp 
-      ? new Date(timestamp * 1000).toISOString() 
-      : new Date().toISOString();
-
-    // Insert event
-    const { data: insertedEvent, error: insertError } = await supabase
-      .from('email_events')
-      .insert({
-        campaign_id: campaign_id,
-        contact_id: contact_id,
+    const deliveredAt = new Date(timestamp * 1000).toISOString();
+    
+    const { error } = await supabase
+      .from('delivery_timestamps')
+      .upsert({
+        campaign_id: campaignId,
         email: email,
-        event_type: eventType,
-        timestamp: eventTimestamp,
-        metadata: {
-          ...event,
-          url: event.url || null,
-          reason: event.reason || null,
-          sendgrid_event_id: event.sg_message_id || event.sg_event_id || null
-        }
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error('❌ Insert error:', insertError.message);
-      throw insertError;
+        delivered_at: deliveredAt
+      }, {
+        onConflict: 'campaign_id,email'
+      });
+    
+    if (error) {
+      console.error('❌ Failed to store delivery timestamp:', error.message);
+    } else {
+      console.log(`✅ Stored delivery timestamp: ${deliveredAt}`);
     }
-
-    console.log(`✅ Event inserted with ID: ${insertedEvent.id}`);
-
-    // Update campaign analytics
-    if (campaign_id) {
-      await updateCampaignAnalytics(campaign_id, contact_id, eventType, supabase);
-    }
-
-    // Handle specific event types
-    switch (eventType) {
-      case 'bounce':
-      case 'dropped':
-        if (contact_id) await handleBounce(contact_id, event.reason, supabase);
-        break;
-      case 'spamreport':
-        if (contact_id) await handleSpamReport(contact_id, supabase);
-        break;
-      case 'unsubscribe':
-        if (contact_id) await handleUnsubscribe(contact_id, email, supabase);
-        break;
-      case 'click':
-        if (campaign_id && contact_id && event.url) {
-          await handleClick(campaign_id, contact_id, event.url, supabase);
-        }
-        break;
-    }
-
-    console.log(`✅ Completed processing ${eventType} event`);
-    return true;
-
   } catch (error: any) {
-    console.error(`❌ Processing error:`, error.message);
-    throw error;
+    console.error('❌ Delivery timestamp storage error:', error.message);
   }
 }
 
+/**
+ * ============================================================================
+ * UPDATED: CAMPAIGN ANALYTICS WITH OPEN FILTERING
+ * ============================================================================
+ */
 async function updateCampaignAnalytics(
   campaignId: string,
   contactId: string | null,
   eventType: string,
+  email: string,      // ✅ NEW PARAMETER
+  timestamp: number,  // ✅ NEW PARAMETER
   supabase: any
 ) {
   console.log(`📊 Updating campaign ${campaignId.substring(0, 8)}... for ${eventType}`);
 
+  // ✅ UPDATED: Map 'delivered' to 'delivered_count' instead of 'recipients_count'
   const statFieldMap: { [key: string]: string } = {
-    'delivered': 'recipients_count',
+    'delivered': 'delivered_count',  // ✅ FIXED: Track confirmed deliveries
     'open': 'opens',
     'click': 'clicks',
     'bounce': 'bounces',
@@ -343,6 +293,63 @@ async function updateCampaignAnalytics(
     return;
   }
 
+  // ========================================================================
+  // ✅ FIXED: FILTER 'OPEN' EVENTS BY TIME DELAY
+  // ========================================================================
+  if (eventType === 'open') {
+    console.log(`🔍 Checking if open is valid (must be >1 second after delivery)`);
+    
+    try {
+      // ✅ FIX: Look up delivery event from email_events table (more reliable)
+      // This table is populated BEFORE delivery_timestamps, so timing is accurate
+      const { data: deliveryEvent, error: fetchError } = await supabase
+        .from('email_events')
+        .select('timestamp')
+        .eq('campaign_id', campaignId)
+        .eq('email', email)
+        .eq('event_type', 'delivered')
+        .order('timestamp', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        // PGRST116 = no rows found, which is okay
+        console.error('❌ Error fetching delivery event:', fetchError.message);
+      }
+      
+      if (deliveryEvent) {
+        const deliveryTime = new Date(deliveryEvent.timestamp).getTime();
+        const openTime = timestamp * 1000; // Convert Unix timestamp to milliseconds
+        const timeSinceDelivery = openTime - deliveryTime;
+        
+        console.log(`⏱️  Delivery: ${new Date(deliveryTime).toISOString()}`);
+        console.log(`⏱️  Open: ${new Date(openTime).toISOString()}`);
+        console.log(`⏱️  Time since delivery: ${timeSinceDelivery}ms`);
+        
+        // ✅ CRITICAL: Reject opens within 1 second (1000ms) of delivery
+        if (timeSinceDelivery < 1000) {
+          console.log(`🚫 REJECTED: Open too soon (${timeSinceDelivery}ms) - likely Gmail/proxy pre-fetch`);
+          console.log(`   This open will NOT be counted in statistics`);
+          return; // Exit early - don't increment opens counter
+        } else {
+          console.log(`✅ VALID OPEN: ${timeSinceDelivery}ms after delivery - counting as real user open`);
+        }
+      } else {
+        console.log(`⚠️  No delivery event found for ${email}`);
+        console.log(`   Possible reasons: delivery before tracking started, or email bounced`);
+        console.log(`   Using conservative approach: allowing this open`);
+        // Allow the open - better to count it than miss legitimate opens
+      }
+    } catch (error: any) {
+      console.error(`❌ Error during open validation:`, error.message);
+      console.log(`   Defaulting to allowing the open (conservative approach)`);
+      // On error, allow the open rather than rejecting it
+    }
+  }
+
+  // ========================================================================
+  // INCREMENT CAMPAIGN STAT
+  // ========================================================================
   try {
     const { error: rpcError } = await supabase.rpc('increment_campaign_stat', {
       p_campaign_id: campaignId,
@@ -354,9 +361,9 @@ async function updateCampaignAnalytics(
       throw rpcError;
     }
 
-    console.log(`✅ Incremented ${statField}`);
+    console.log(`✅ Incremented ${statField} for campaign ${campaignId.substring(0, 8)}...`);
 
-    // Update contact engagement
+    // Update contact engagement score
     if (contactId) {
       const engagementPoints: { [key: string]: number } = {
         'open': 5,
@@ -382,6 +389,11 @@ async function updateCampaignAnalytics(
   }
 }
 
+/**
+ * ============================================================================
+ * OTHER EVENT HANDLERS (unchanged)
+ * ============================================================================
+ */
 async function handleBounce(contactId: string, reason: string, supabase: any) {
   const { error } = await supabase
     .from('contacts')
@@ -445,10 +457,116 @@ async function handleClick(
 
 /**
  * ============================================================================
+ * EVENT PROCESSING - UPDATED
+ * ============================================================================
+ */
+async function processSendGridEvent(event: any, supabase: any) {
+  const eventType = event.event;
+  const email = event.email;
+  const timestamp = event.timestamp;
+
+  console.log(`\n📧 Processing ${eventType} event for ${email}`);
+
+  const campaign_id = extractCampaignId(event);
+  const contact_id = extractContactId(event);
+
+  console.log('🔍 Event Payload Analysis:');
+  console.log(`   Event Type: ${eventType}`);
+  console.log(`   Email: ${email}`);
+  console.log(`   Campaign ID: ${campaign_id || '❌ NOT FOUND'}`);
+  console.log(`   Contact ID: ${contact_id || '❌ NOT FOUND'}`);
+  console.log(`   Timestamp: ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
+
+  if (!campaign_id) {
+    console.warn(`⚠️  No campaign_id found - event will not be linked to campaign`);
+  }
+
+  try {
+    const eventTimestamp = timestamp 
+      ? new Date(timestamp * 1000).toISOString() 
+      : new Date().toISOString();
+
+    // Insert event into email_events table
+    const { data: insertedEvent, error: insertError } = await supabase
+      .from('email_events')
+      .insert({
+        campaign_id: campaign_id,
+        contact_id: contact_id,
+        email: email,
+        event_type: eventType,
+        timestamp: eventTimestamp,
+        metadata: {
+          ...event,
+          url: event.url || null,
+          reason: event.reason || null,
+          sendgrid_event_id: event.sg_message_id || event.sg_event_id || null
+        }
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.error('❌ Insert error:', insertError.message);
+      throw insertError;
+    }
+
+    console.log(`✅ Event inserted with ID: ${insertedEvent.id}`);
+
+    // ✅ UPDATED: Update campaign analytics with new parameters
+    if (campaign_id) {
+      await updateCampaignAnalytics(
+        campaign_id, 
+        contact_id, 
+        eventType,
+        email,      // ✅ NEW: Pass email for delivery lookup
+        timestamp,  // ✅ NEW: Pass timestamp for time calculation
+        supabase
+      );
+    }
+
+    // ✅ UPDATED: Handle specific event types
+    switch (eventType) {
+      case 'delivered':
+        // ✅ NEW: Store delivery timestamp for open filtering
+        if (campaign_id) {
+          await handleDelivered(campaign_id, email, timestamp, supabase);
+        }
+        break;
+        
+      case 'bounce':
+      case 'dropped':
+        if (contact_id) await handleBounce(contact_id, event.reason, supabase);
+        break;
+        
+      case 'spamreport':
+        if (contact_id) await handleSpamReport(contact_id, supabase);
+        break;
+        
+      case 'unsubscribe':
+        if (contact_id) await handleUnsubscribe(contact_id, email, supabase);
+        break;
+        
+      case 'click':
+        if (campaign_id && contact_id && event.url) {
+          await handleClick(campaign_id, contact_id, event.url, supabase);
+        }
+        break;
+    }
+
+    console.log(`✅ Completed processing ${eventType} event`);
+    return true;
+
+  } catch (error: any) {
+    console.error(`❌ Processing error:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * ============================================================================
  * MAIN HANDLER
  * ============================================================================
  */
-
 serve(async (req) => {
   console.log('\n' + '='.repeat(80));
   console.log('📨 SENDGRID WEBHOOK RECEIVED');
