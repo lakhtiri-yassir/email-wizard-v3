@@ -280,14 +280,25 @@ export default function TemplateViewer({
                 </Button>
               )}
               {onEdit && (
-                <Button
-                  variant="secondary"
-                  onClick={onEdit}
-                  icon={Edit2}
-                >
-                  Full Editor
-                </Button>
-              )}
+  <Button
+    variant="secondary"
+    onClick={() => {
+      console.log('📝 Opening Full Editor for template:', template.id);
+      
+      // ✅ FIX: Proper navigation with state
+      navigate(`/app/templates/editor`, {
+        state: {
+          mode: 'edit',
+          template: template,
+          returnUrl: location.pathname // Allow return to current page
+        }
+      });
+    }}
+    icon={Edit2}
+  >
+    Full Editor
+  </Button>
+)}
             </div>
 
             {!template.is_locked && onDelete && (

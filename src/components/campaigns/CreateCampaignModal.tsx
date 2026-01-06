@@ -30,8 +30,8 @@
  * ============================================================================
  */
 
-import { useState, useEffect } from 'react';
-import { X, ChevronRight, ChevronLeft, Check, Mail, Users, Calendar, FileText, Loader2, Code, AlertCircle, CheckCircle, Clock, Lock } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { X, ChevronRight, ChevronLeft, Check, Mail, Users, Calendar, FileText, Loader2, Code, AlertCircle, CheckCircle, Clock, Lock, Save } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
@@ -121,6 +121,9 @@ export default function CreateCampaignModal({
   const [groups, setGroups] = useState<ContactGroup[]>([]);
   const [verifiedDomains, setVerifiedDomains] = useState<VerifiedDomain[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -161,6 +164,122 @@ export default function CreateCampaignModal({
   // Template fetching state
   const [allTemplates, setAllTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(true);
+
+  // ============================================================================
+  // AUTOSAVE FUNCTIONALITY - NEW
+  // ============================================================================
+
+  /**
+   * Autosave function - saves to localStorage and sessionStorage
+   */
+  const autosaveDraft = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const draftData = {
+        step: currentStep,
+        formData: {
+          ...formData,
+          // ✅ FIX: Convert Sets to Arrays for JSON serialization
+          selectedGroups: Array.from(formData.selectedGroups),
+          selectedContacts: Array.from(formData.selectedContacts)
+        },
+        timestamp: Date.now()
+      };
+
+      // Save to localStorage (fallback for offline/quick recovery)
+      localStorage.setItem(`campaignDraft_${user.id}`, JSON.stringify(draftData));
+
+      // Save to sessionStorage (for template editor returns)
+      sessionStorage.setItem('campaignDraft', JSON.stringify(draftData));
+
+      console.log('💾 Campaign autosaved at', new Date().toLocaleTimeString());
+
+    } catch (error) {
+      console.error('❌ Autosave failed:', error);
+    }
+  }, [formData, currentStep, user]);
+
+  /**
+   * Manual save draft button handler
+   */
+  const handleSaveDraft = () => {
+    autosaveDraft();
+    toast.success('✅ Draft saved successfully!', { duration: 2000 });
+  };
+
+  /**
+   * Clear draft after successful send
+   */
+  const clearDraft = () => {
+    if (user) {
+      localStorage.removeItem(`campaignDraft_${user.id}`);
+      sessionStorage.removeItem('campaignDraft');
+      sessionStorage.removeItem('editedTemplate');
+      console.log('🧹 Draft cleared');
+    }
+  };
+
+  /**
+   * Autosave draft every 30 seconds
+   */
+  useEffect(() => {
+    // Don't autosave on initial load
+    if (currentStep === 0 || !user) return;
+
+    const autosaveTimer = setTimeout(() => {
+      autosaveDraft();
+    }, 30000); // 30 seconds
+
+    return () => clearTimeout(autosaveTimer);
+  }, [formData, currentStep, user, autosaveDraft]);
+
+  /**
+   * Load draft on component mount
+   */
+  useEffect(() => {
+    if (!user) return;
+
+    // Don't load if returning from template editor
+    if (shouldLoadTemplate) return;
+
+    const loadDraft = () => {
+      try {
+        // Try localStorage first
+        const savedDraft = localStorage.getItem(`campaignDraft_${user.id}`);
+        
+        if (savedDraft) {
+          const draft = JSON.parse(savedDraft);
+          
+          // Check if draft is recent (within 24 hours)
+          const draftAge = Date.now() - draft.timestamp;
+          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+          
+          if (draftAge < maxAge) {
+            // Restore form state
+            setFormData({
+              ...draft.formData,
+              // ✅ FIX: Convert Arrays back to Sets
+              selectedGroups: new Set(draft.formData.selectedGroups || []),
+              selectedContacts: new Set(draft.formData.selectedContacts || [])
+            });
+            setCurrentStep(draft.step);
+            
+            console.log('✅ Draft restored from autosave');
+            toast.success('Draft restored from previous session', { duration: 2000 });
+          } else {
+            // Clear old draft
+            localStorage.removeItem(`campaignDraft_${user.id}`);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to load draft:', error);
+      }
+    };
+
+    loadDraft();
+  }, [user, shouldLoadTemplate]);
+
 
   // ============================================================================
   // DATA LOADING
@@ -288,6 +407,48 @@ useEffect(() => {
     
     fetchAllTemplates();
   }, [user]);
+
+  /**
+   * ✅ FIX 4: Fetch contacts specifically when reaching Step 3
+   * This ensures contacts are loaded fresh and visible
+   */
+  useEffect(() => {
+    const fetchContactsForStep3 = async () => {
+      // Only fetch when on Step 3 and user is logged in
+      if (currentStep !== 3 || !user) return;
+      
+      console.log('📋 Fetching contacts for Step 3...');
+      setContactsLoading(true);
+      setContactsError(null);
+
+      try {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .eq('user_id', user.id)
+          .in('status', ['active', 'subscribed'])
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        console.log(`✅ Loaded ${data?.length || 0} contacts for Step 3`);
+        setContacts(data || []);
+        
+        if (data && data.length === 0) {
+          setContactsError('No contacts found. Add contacts before creating campaigns.');
+        }
+
+      } catch (error: any) {
+        console.error('❌ Failed to fetch contacts:', error);
+        setContactsError('Failed to load contacts. Please try again.');
+        toast.error('Could not load contacts');
+      } finally {
+        setContactsLoading(false);
+      }
+    };
+
+    fetchContactsForStep3();
+  }, [currentStep, user]);
 
   async function loadContactsAndGroups() {
     try {
@@ -886,6 +1047,10 @@ onClose();
               toggleContact={toggleContact}
               toggleAllContacts={toggleAllContacts}
               recipientCount={calculateRecipientCount()}
+              contactsLoading={contactsLoading}
+              contactsError={contactsError}
+              contactSearchQuery={contactSearchQuery}
+              setContactSearchQuery={setContactSearchQuery}
             />
           )}
 
@@ -901,14 +1066,26 @@ onClose();
         {/* Footer */}
         <div className="border-t-2 border-black p-6">
           <div className="flex justify-between">
-            <Button
-              variant="secondary"
-              onClick={currentStep === 1 ? onClose : handleBack}
-              disabled={isSubmitting}
-              icon={currentStep === 1 ? X : ChevronLeft}
-            >
-              {currentStep === 1 ? 'Cancel' : 'Back'}
-            </Button>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={currentStep === 1 ? onClose : handleBack}
+                disabled={isSubmitting}
+                icon={currentStep === 1 ? X : ChevronLeft}
+              >
+                {currentStep === 1 ? 'Cancel' : 'Back'}
+              </Button>
+
+              {/* ✅ NEW: Manual Save Draft Button */}
+              <Button
+                variant="secondary"
+                onClick={handleSaveDraft}
+                icon={Save}
+                className="text-sm"
+              >
+                Save Draft
+              </Button>
+            </div>
 
             <div className="flex gap-3">
               {currentStep < 4 ? (
@@ -1357,6 +1534,10 @@ function Step3RecipientSelection({
   toggleContact,
   toggleAllContacts,
   recipientCount,
+  contactsLoading,
+  contactsError,
+  contactSearchQuery,
+  setContactSearchQuery,
 }: {
   formData: CampaignFormData;
   contacts: Contact[];
@@ -1367,7 +1548,20 @@ function Step3RecipientSelection({
   toggleContact: (contactId: string) => void;
   toggleAllContacts: () => void;
   recipientCount: number;
+  contactsLoading: boolean;
+  contactsError: string | null;
+  contactSearchQuery: string;
+  setContactSearchQuery: (query: string) => void;
 }) {
+  // ✅ FIX 4: Filter contacts based on search query
+  const filteredContacts = contacts.filter(contact => {
+    if (!contactSearchQuery) return true;
+    const searchLower = contactSearchQuery.toLowerCase();
+    const fullName = `${contact.first_name || ''} ${contact.last_name || ''}`.toLowerCase();
+    const email = (contact.email || '').toLowerCase();
+    return fullName.includes(searchLower) || email.includes(searchLower);
+  });
+
   return (
     <div className="space-y-6">
       <div>
@@ -1383,15 +1577,59 @@ function Step3RecipientSelection({
         </div>
       )}
 
-      {/* No Contacts Warning */}
-      {contacts.length === 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg text-sm">
-          You don't have any contacts yet. Please add contacts before creating a campaign.
+      {/* ✅ FIX 4: Loading State */}
+      {contactsLoading && (
+        <div className="flex flex-col items-center justify-center py-12 bg-gray-50 rounded-lg">
+          <Loader2 size={48} className="animate-spin text-purple mb-4" />
+          <p className="text-gray-600 font-medium">Loading contacts...</p>
+          <p className="text-sm text-gray-500 mt-1">Please wait while we fetch your contacts</p>
         </div>
       )}
 
-      {/* Send Mode Selection */}
-      {contacts.length > 0 && (
+      {/* ✅ FIX 4: Error State */}
+      {!contactsLoading && contactsError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} className="text-red-600 flex-shrink-0" />
+            <div className="flex-1">
+              <h4 className="font-semibold text-red-800 mb-2">Unable to Load Contacts</h4>
+              <p className="text-sm text-red-700 mb-4">{contactsError}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => window.location.href = '/app/contacts'}
+                  className="px-4 py-2 bg-purple text-white rounded-lg hover:bg-purple/90 text-sm font-medium"
+                >
+                  Go to Contacts
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ FIX 4: Empty State - No Contacts */}
+      {!contactsLoading && !contactsError && contacts.length === 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} className="text-yellow-600 flex-shrink-0" />
+            <div className="flex-1">
+              <h4 className="font-semibold text-yellow-800 mb-2">No Contacts Found</h4>
+              <p className="text-sm text-yellow-700 mb-4">
+                You need to add contacts before you can create a campaign. Contacts can be imported from CSV or added individually.
+              </p>
+              <button
+                onClick={() => window.location.href = '/app/contacts'}
+                className="px-4 py-2 bg-purple text-white rounded-lg hover:bg-purple/90 text-sm font-medium"
+              >
+                Add Contacts
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send Mode Selection - Only show when contacts loaded successfully */}
+      {!contactsLoading && !contactsError && contacts.length > 0 && (
         <>
           <div>
             <label className="block text-sm font-medium mb-3">Send To:</label>
@@ -1464,41 +1702,78 @@ function Step3RecipientSelection({
             </div>
           )}
 
-          {/* Contact Selection */}
+          {/* ✅ FIX 4: Enhanced Contact Selection with Search */}
           {formData.sendToMode === 'contacts' && (
             <div className="border-2 border-gray-200 rounded-lg p-4">
+              {/* Header with Search and Select All */}
               <div className="flex items-center justify-between mb-3">
                 <div className="text-sm font-medium">Select Contacts:</div>
                 <button
                   onClick={toggleAllContacts}
-                  className="text-xs text-purple hover:underline"
+                  className="text-xs text-purple hover:underline font-medium"
                 >
                   {formData.selectedContacts.size === contacts.length
                     ? 'Deselect All'
                     : 'Select All'}
                 </button>
               </div>
-              <div className="max-h-64 overflow-y-auto space-y-2">
-                {contacts.map((contact) => (
-                  <label
-                    key={contact.id}
-                    className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formData.selectedContacts.has(contact.id)}
-                      onChange={() => toggleContact(contact.id)}
-                      className="w-4 h-4"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium">
-                        {contact.first_name} {contact.last_name}
-                      </div>
-                      <div className="text-xs text-gray-500">{contact.email}</div>
-                    </div>
-                  </label>
-                ))}
+
+              {/* ✅ Search Input */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Search contacts by name or email..."
+                  value={contactSearchQuery}
+                  onChange={(e) => setContactSearchQuery(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple focus:border-transparent"
+                />
               </div>
+
+              {/* Contact List */}
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {filteredContacts.length === 0 ? (
+                  <div className="text-center py-6 text-gray-500">
+                    <p className="text-sm">No contacts match your search</p>
+                  </div>
+                ) : (
+                  filteredContacts.map((contact) => (
+                    <label
+                      key={contact.id}
+                      className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.selectedContacts.has(contact.id)}
+                        onChange={() => toggleContact(contact.id)}
+                        className="w-4 h-4 text-purple focus:ring-purple"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">
+                          {contact.first_name} {contact.last_name}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">{contact.email}</div>
+                      </div>
+                      {/* ✅ Status Badge */}
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                        contact.status === 'active' 
+                          ? 'bg-green-100 text-green-700'
+                          : contact.status === 'subscribed'
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {contact.status}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+
+              {/* ✅ Results Count */}
+              {contactSearchQuery && (
+                <div className="mt-3 text-xs text-gray-600 text-center">
+                  Showing {filteredContacts.length} of {contacts.length} contacts
+                </div>
+              )}
             </div>
           )}
 

@@ -119,13 +119,25 @@ export default function Templates() {
     return;
   }
 
-  // Only navigate to edit for custom (unlocked) templates
-  navigate(`/app/templates/edit/${template.id}`);
+  // ✅ FIX 5: Navigate to editor with proper state
+  navigate('/app/templates/editor', {
+    state: {
+      mode: 'edit',
+      template: template,
+      returnUrl: window.location.pathname
+    }
+  });
 }
 
   function handleUseTemplate(template: Template) {
-    // Navigate to editor with the template loaded
-    navigate(`/app/templates/edit/${template.id}`);
+    // ✅ FIX 5: Navigate to editor with proper state
+    navigate('/app/templates/editor', {
+      state: {
+        mode: 'edit',
+        template: template,
+        returnUrl: window.location.pathname
+      }
+    });
   }
 
   async function handleDuplicateTemplate(template: Template) {

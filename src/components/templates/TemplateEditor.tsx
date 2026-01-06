@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { 
   X, 
   Eye, 
@@ -67,6 +67,7 @@ export default function TemplateEditor({
 }: TemplateEditorProps) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const { user } = useAuth();
 
   // ✅ FIX: Detect campaign creation context
@@ -90,6 +91,27 @@ export default function TemplateEditor({
       loadTemplate(templateId);
     }
   }, [templateId]);
+
+  // ✅ FIX 5: Handle navigation state from Templates page
+  useEffect(() => {
+    if (location.state?.template && location.state?.mode === 'edit') {
+      const { template, returnUrl } = location.state;
+      console.log('📥 Loading template from navigation state:', template.name);
+      
+      setTemplateName(template.name);
+      setTemplateCategory(template.category || 'marketing');
+      setSections(template.content?.sections || []);
+      setSettings(template.content?.settings || DEFAULT_SETTINGS);
+      
+      // Store return URL in sessionStorage for back navigation
+      if (returnUrl) {
+        sessionStorage.setItem('editorReturnUrl', returnUrl);
+      }
+      
+      // Clear navigation state to prevent re-loading on refresh
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   async function loadTemplate(id: string) {
     try {
