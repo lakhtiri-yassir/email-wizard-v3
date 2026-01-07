@@ -175,16 +175,16 @@ export default function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      // Calculate total opens and clicks from campaign_analytics
+      // ✅ FIXED: Calculate total opens and clicks from email_events table
       let totalOpens = 0;
       let totalClicks = 0;
 
       if (campaigns && campaigns.length > 0) {
         const campaignIds = campaigns.map(c => c.id);
         
-        // Get analytics data
+        // Get analytics data from email_events table
         const { data: analytics } = await supabase
-          .from('campaign_analytics')
+          .from('email_events')  // ✅ FIXED: Correct table name
           .select('event_type')
           .in('campaign_id', campaignIds);
 
@@ -220,13 +220,13 @@ export default function Dashboard() {
     try {
       const { startDate, endDate } = getDateRangeBounds();
 
-      // Fetch campaign analytics within date range
+      // ✅ FIXED: Fetch email events within date range
       const { data: analytics } = await supabase
-        .from('campaign_analytics')
-        .select('event_type, created_at, campaign_id')
-        .gte('created_at', startDate)
-        .lte('created_at', endDate)
-        .order('created_at', { ascending: true });
+        .from('email_events')  // ✅ FIXED: Correct table name
+        .select('event_type, timestamp, campaign_id')  // ✅ FIXED: timestamp not created_at
+        .gte('timestamp', startDate)  // ✅ FIXED: Use timestamp column
+        .lte('timestamp', endDate)
+        .order('timestamp', { ascending: true });
 
       if (!analytics || analytics.length === 0) {
         setTimeSeriesData([]);
@@ -244,7 +244,7 @@ export default function Dashboard() {
 
       // Populate with actual data
       analytics.forEach(event => {
-        const date = new Date(event.created_at).toISOString().split('T')[0];
+        const date = new Date(event.timestamp).toISOString().split('T')[0];  // ✅ FIXED: Use timestamp
         const current = dataByDate.get(date) || { opens: 0, clicks: 0 };
         
         if (event.event_type === 'open') {
