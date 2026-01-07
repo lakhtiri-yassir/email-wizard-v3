@@ -5,7 +5,7 @@ import { AdminAuthProvider, useAdminAuth } from './contexts/AdminAuthContext';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
-import { Dashboard } from './pages/app/Dashboard';
+import Dashboard from './pages/app/Dashboard';
 import { Contacts } from './pages/app/Contacts';
 import { Campaigns } from './pages/app/Campaigns';
 import Templates from './pages/app/Templates';
