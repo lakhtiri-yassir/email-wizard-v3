@@ -1,22 +1,15 @@
 /**
  * ============================================================================
- * Dashboard Component - FIXED
+ * Dashboard Component - FIXED WITH GRAPHS
  * ============================================================================
  * 
- * FIX 7: Improved UX with Quick Start Guide
+ * FIX 7: Improved UX with Quick Start Guide + Original Graphs
  * 
- * Fixed Issues:
- * - Non-intuitive navigation for first-time users
- * - Lack of onboarding guidance
- * - Unclear next steps
- * - Missing context for features
- * 
- * New Features:
- * - Quick Start Guide modal for new users
- * - Step-by-step setup checklist
- * - Contextual help throughout dashboard
- * - Clear call-to-actions
- * - Visual progress indicators
+ * This version combines:
+ * - Quick Start Guide for new users
+ * - Setup progress tracking
+ * - Original open rate and click rate graphs
+ * - Recent campaigns table
  * 
  * ============================================================================
  */
@@ -37,7 +30,8 @@ import {
   Rocket,
   Globe,
   BookOpen,
-  Zap
+  Zap,
+  MousePointerClick
 } from 'lucide-react';
 import { AppLayout } from '../../components/app/AppLayout';
 import { Button } from '../../components/ui/Button';
@@ -50,6 +44,7 @@ interface DashboardStats {
   totalContacts: number;
   emailsSent: number;
   averageOpenRate: number;
+  averageClickRate: number;
   recentCampaigns: any[];
 }
 
@@ -58,6 +53,12 @@ interface SetupProgress {
   hasContacts: boolean;
   hasTemplate: boolean;
   hasSentCampaign: boolean;
+}
+
+interface ChartDataPoint {
+  name: string;
+  openRate: number;
+  clickRate: number;
 }
 
 export default function Dashboard() {
@@ -70,6 +71,7 @@ export default function Dashboard() {
     totalContacts: 0,
     emailsSent: 0,
     averageOpenRate: 0,
+    averageClickRate: 0,
     recentCampaigns: [],
   });
   const [setupProgress, setSetupProgress] = useState<SetupProgress>({
@@ -78,6 +80,7 @@ export default function Dashboard() {
     hasTemplate: false,
     hasSentCampaign: false,
   });
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   
   // ✅ FIX 7: Quick Start Guide state
   const [showQuickStart, setShowQuickStart] = useState(false);
@@ -170,14 +173,27 @@ export default function Dashboard() {
       const avgOpenRate = campaigns && campaigns.length > 0
         ? campaigns.reduce((sum, c) => sum + (c.open_rate || 0), 0) / campaigns.length
         : 0;
+      const avgClickRate = campaigns && campaigns.length > 0
+        ? campaigns.reduce((sum, c) => sum + (c.click_rate || 0), 0) / campaigns.length
+        : 0;
+
+      // Prepare chart data (last 7 campaigns)
+      const chartCampaigns = campaigns?.slice(0, 7).reverse() || [];
+      const chartDataPoints: ChartDataPoint[] = chartCampaigns.map(campaign => ({
+        name: campaign.name.length > 15 ? campaign.name.substring(0, 15) + '...' : campaign.name,
+        openRate: campaign.open_rate || 0,
+        clickRate: campaign.click_rate || 0,
+      }));
 
       setStats({
         totalCampaigns,
         totalContacts: contactCount || 0,
         emailsSent,
         averageOpenRate: avgOpenRate,
+        averageClickRate: avgClickRate,
         recentCampaigns: campaigns?.slice(0, 5) || [],
       });
+      setChartData(chartDataPoints);
     } catch (error: any) {
       console.error('Failed to load dashboard:', error);
       toast.error('Failed to load dashboard data');
@@ -304,6 +320,33 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* ✅ ORIGINAL: Charts Section */}
+        {chartData.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* Open Rate Chart */}
+            <div className="bg-white rounded-lg border-2 border-black shadow-lg p-6">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <TrendingUp size={20} className="text-blue-600" />
+                Open Rate Trends
+              </h3>
+              <div className="h-64">
+                <SimpleBarChart data={chartData} dataKey="openRate" color="#3b82f6" />
+              </div>
+            </div>
+
+            {/* Click Rate Chart */}
+            <div className="bg-white rounded-lg border-2 border-black shadow-lg p-6">
+              <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <MousePointerClick size={20} className="text-purple" />
+                Click Rate Trends
+              </h3>
+              <div className="h-64">
+                <SimpleBarChart data={chartData} dataKey="clickRate" color="#9333ea" />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Recent Campaigns */}
         <div className="bg-white rounded-lg border-2 border-black shadow-lg overflow-hidden">
           <div className="p-6 bg-gold border-b-2 border-black">
@@ -341,6 +384,12 @@ export default function Dashboard() {
                       Recipients
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Open Rate
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Click Rate
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Sent Date
                     </th>
                   </tr>
@@ -362,6 +411,12 @@ export default function Dashboard() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {campaign.recipients_count || 0}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {campaign.open_rate ? `${Math.round(campaign.open_rate)}%` : '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {campaign.click_rate ? `${Math.round(campaign.click_rate)}%` : '-'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {campaign.sent_at
@@ -386,6 +441,59 @@ export default function Dashboard() {
         />
       )}
     </AppLayout>
+  );
+}
+
+// ============================================================================
+// ✅ ORIGINAL: SIMPLE BAR CHART COMPONENT
+// ============================================================================
+
+interface SimpleBarChartProps {
+  data: ChartDataPoint[];
+  dataKey: 'openRate' | 'clickRate';
+  color: string;
+}
+
+function SimpleBarChart({ data, dataKey, color }: SimpleBarChartProps) {
+  if (data.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        No data available
+      </div>
+    );
+  }
+
+  const maxValue = Math.max(...data.map(d => d[dataKey]), 10);
+  const scale = 100 / maxValue;
+
+  return (
+    <div className="h-full flex items-end justify-between gap-2 px-4">
+      {data.map((point, index) => {
+        const height = point[dataKey] * scale;
+        return (
+          <div key={index} className="flex-1 flex flex-col items-center gap-2">
+            <div className="w-full flex items-end justify-center" style={{ height: '200px' }}>
+              <div
+                className="w-full rounded-t-lg transition-all duration-300 hover:opacity-80 relative group"
+                style={{
+                  height: `${height}%`,
+                  backgroundColor: color,
+                  minHeight: point[dataKey] > 0 ? '4px' : '0px',
+                }}
+              >
+                {/* Tooltip on hover */}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                  {point[dataKey].toFixed(1)}%
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-gray-600 text-center truncate w-full">
+              {point.name}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
