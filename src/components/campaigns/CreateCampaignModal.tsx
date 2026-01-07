@@ -1124,16 +1124,17 @@ onClose();
               </Button>
 
               {/* ✅ NEW: Manual Save Draft Button */}
-              {!isEditMode && ( // ✅ Only show for new campaigns
-  <Button
-    variant="secondary"
-    onClick={handleSaveDraft}
-    icon={Save}
-    className="text-sm"
-  >
-    Save Draft
-  </Button>
-)}
+              {!isEditMode && (
+                <Button
+                  variant="secondary"
+                  onClick={handleSaveDraft}
+                  icon={Save}
+                  className="text-sm"
+                >
+                  Save Draft
+                </Button>
+              )}
+            </div>
 
             <div className="flex gap-3">
               {currentStep < 4 ? (
@@ -1147,18 +1148,18 @@ onClose();
                 </Button>
               ) : (
                 <Button
-  variant="primary"
-  onClick={handleCreateCampaign}
-  loading={isSubmitting}
-  disabled={isSubmitting}
-  icon={Mail}
->
-  {isEditMode 
-    ? 'Update Campaign' // ✅ Show "Update" when editing
-    : formData.scheduleMode === 'now' ? 'Create & Prepare to Send' 
-    : formData.scheduleMode === 'later' ? 'Schedule Campaign'
-    : 'Save as Draft'}
-</Button>
+                  variant="primary"
+                  onClick={handleCreateCampaign}
+                  loading={isSubmitting}
+                  disabled={isSubmitting}
+                  icon={Mail}
+                >
+                  {isEditMode 
+                    ? 'Update Campaign'
+                    : formData.scheduleMode === 'now' ? 'Create & Prepare to Send' 
+                    : formData.scheduleMode === 'later' ? 'Schedule Campaign'
+                    : 'Save as Draft'}
+                </Button>
               )}
             </div>
           </div>
