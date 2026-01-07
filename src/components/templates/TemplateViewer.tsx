@@ -291,7 +291,7 @@ export default function TemplateViewer({
       console.log('📝 Opening Full Editor for template:', template.id);
       
       // ✅ FIX: Proper navigation with state
-      navigate(`/app/templates/editor`, {
+      navigate(`/app/template/editor`, {
         state: {
           mode: 'edit',
           template: template,

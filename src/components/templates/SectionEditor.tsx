@@ -23,7 +23,7 @@
  * ============================================================================
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   GripVertical,
   Plus,
@@ -107,6 +107,11 @@ export default function SectionEditor({ sections, onChange }: SectionEditorProps
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(sections.map((s) => s.id))
   );
+
+  // Keep all sections expanded by default when sections change
+  useEffect(() => {
+    setExpandedSections(new Set(sections.map((s) => s.id)));
+  }, [sections]);
 
   // ============================================================================
   // SECTION MANAGEMENT

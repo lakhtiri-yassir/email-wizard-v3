@@ -103,7 +103,7 @@ export default function Templates() {
   const categories = ['all', ...Array.from(new Set(templates.map((t) => t.category)))];
 
   function handleCreateNew() {
-    navigate('/app/templates/editor');
+    navigate('/app/template/editor');
   }
 
   function handlePreviewTemplate(template: Template) {
@@ -120,7 +120,7 @@ export default function Templates() {
   }
 
   // ✅ FIX 5: Navigate to editor with proper state
-  navigate('/app/templates/editor', {
+  navigate('/app/template/editor', {
     state: {
       mode: 'edit',
       template: template,
@@ -131,7 +131,7 @@ export default function Templates() {
 
   function handleUseTemplate(template: Template) {
     // ✅ FIX 5: Navigate to editor with proper state
-    navigate('/app/templates/editor', {
+    navigate('/app/template/editor', {
       state: {
         mode: 'edit',
         template: template,
