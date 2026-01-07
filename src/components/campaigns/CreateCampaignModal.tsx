@@ -203,111 +203,93 @@ const [formData, setFormData] = useState<CampaignFormData>(getInitialFormData())
   // AUTOSAVE FUNCTIONALITY - NEW
   // ============================================================================
 
+  // ============================================================================
+  // DRAFT SAVING - DATABASE ONLY (NO AUTO-SAVE)
+  // ============================================================================
+
   /**
-   * Autosave function - saves to localStorage and sessionStorage
+   * Save draft to database - NO VALIDATION REQUIRED
+   * Can be called from any step with partial data
    */
-  const autosaveDraft = useCallback(async () => {
-    if (!user) return;
-    if (isEditMode) return;
+  const handleSaveDraft = async () => {
+    if (!user) {
+      toast.error('You must be logged in to save drafts');
+      return;
+    }
 
     try {
-      const draftData = {
-        step: currentStep,
-        formData: {
-          ...formData,
-          // ✅ FIX: Convert Sets to Arrays for JSON serialization
-          selectedGroups: Array.from(formData.selectedGroups),
-          selectedContacts: Array.from(formData.selectedContacts)
+      setIsSubmitting(true);
+
+      // Prepare campaign data - use current values, allow empty/incomplete
+      const campaignData: any = {
+        user_id: user.id,
+        name: formData.name?.trim() || 'Untitled Campaign',
+        subject: formData.subject?.trim() || '',
+        preview_text: formData.previewText?.trim() || null,
+        from_name: formData.fromName?.trim() || '',
+        from_email: formData.fromEmail?.trim() || '',
+        reply_to: formData.replyTo?.trim() || '',
+        custom_html: formData.customHtml?.trim() || null,
+        content: {
+          templateId: formData.templateId || '',
+          description: formData.description?.trim() || '',
+          html: formData.customHtml?.trim() || null,
+          recipients: {
+            sendToMode: formData.sendToMode,
+            selectedGroups: Array.from(formData.selectedGroups),
+            selectedContacts: Array.from(formData.selectedContacts),
+          },
+          currentStep: currentStep, // Save which step user is on
         },
-        timestamp: Date.now()
+        status: 'draft',
+        recipients_count: calculateRecipientCount(),
+        updated_at: new Date().toISOString(),
       };
 
-      // Save to localStorage (fallback for offline/quick recovery)
-      localStorage.setItem(`campaignDraft_${user.id}`, JSON.stringify(draftData));
+      let campaign;
 
-      // Save to sessionStorage (for template editor returns)
-      sessionStorage.setItem('campaignDraft', JSON.stringify(draftData));
-
-      console.log('💾 Campaign autosaved at', new Date().toLocaleTimeString());
-
-    } catch (error) {
-      console.error('❌ Autosave failed:', error);
-    }
-  }, [formData, currentStep, user, isEditMode]);
-
-  /**
-   * Manual save draft button handler
-   */
-  const handleSaveDraft = () => {
-    autosaveDraft();
-    toast.success('✅ Draft saved successfully!', { duration: 2000 });
-  };
-
-  /**
-   * Clear draft after successful send
-   */
-  const clearDraft = () => {
-    if (user) {
-      localStorage.removeItem(`campaignDraft_${user.id}`);
-      sessionStorage.removeItem('campaignDraft');
-      sessionStorage.removeItem('editedTemplate');
-      console.log('🧹 Draft cleared');
-    }
-  };
-
-  /**
-   * Autosave draft every 30 seconds
-   */
-  useEffect(() => {
-    // Don't autosave on initial load
-    if (currentStep === 0 || !user || isEditMode) return;
-
-    const autosaveTimer = setTimeout(() => {
-      autosaveDraft();
-    }, 10000); // 30 seconds
-
-    return () => clearTimeout(autosaveTimer);
-  }, [formData, currentStep, user, autosaveDraft, isEditMode]);
-
-  /**
-   * Load draft on component mount
-   */
-  useEffect(() => {
-  if (!user || shouldLoadTemplate || isEditMode) return; // ✅ Added isEditMode
-
-    const loadDraft = () => {
-      try {
-        // Try localStorage first
-        const savedDraft = localStorage.getItem(`campaignDraft_${user.id}`);
+      if (isEditMode) {
+        // UPDATE existing draft
+        console.log('📝 Updating draft:', editingCampaign.id);
         
-        if (savedDraft) {
-          const draft = JSON.parse(savedDraft);
-          
-          // Check if draft is recent (within 24 hours)
-          const draftAge = Date.now() - draft.timestamp;
-          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-          
-          if (draftAge < maxAge) {
-            // Restore form state
-            setFormData({
-              ...draft.formData,
-              // ✅ FIX: Convert Arrays back to Sets
-              selectedGroups: new Set(draft.formData.selectedGroups || []),
-              selectedContacts: new Set(draft.formData.selectedContacts || [])
-            });
-            setCurrentStep(draft.step);
-            
-            console.log('✅ Draft restored from autosave');
-            toast.success('Draft restored from previous session', { duration: 2000 });
-          } else {
-            // Clear old draft
-            localStorage.removeItem(`campaignDraft_${user.id}`);
-          }
-        }
-      } catch (error) {
-        console.error('❌ Failed to load draft:', error);
+        const { data, error } = await supabase
+          .from('campaigns')
+          .update(campaignData)
+          .eq('id', editingCampaign.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+        campaign = data;
+        
+        toast.success('✅ Draft updated successfully!');
+      } else {
+        // INSERT new draft
+        console.log('💾 Saving new draft...');
+        
+        const { data, error } = await supabase
+          .from('campaigns')
+          .insert(campaignData)
+          .select()
+          .single();
+
+        if (error) throw error;
+        campaign = data;
+        
+        toast.success('✅ Draft saved successfully!');
       }
-    };
+
+      // After saving, call onSuccess to refresh campaign list
+      onSuccess(campaign);
+      onClose();
+
+    } catch (error: any) {
+      console.error('❌ Failed to save draft:', error);
+      toast.error(error.message || 'Failed to save draft');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
     loadDraft();
   }, [user, shouldLoadTemplate, isEditMode]);
@@ -1069,6 +1051,8 @@ onClose();
               verifiedDomains={verifiedDomains}
               defaultDomain={defaultDomain}
               username={username}
+              onSaveDraft={handleSaveDraft}
+              isSubmitting={isSubmitting}
             />
           )}
 
@@ -1080,6 +1064,8 @@ onClose();
               userPlan={profile?.plan_type || 'free'}
               allTemplates={allTemplates}
               loadingTemplates={loadingTemplates}
+              onSaveDraft={handleSaveDraft}
+              isSubmitting={isSubmitting}
             />
           )}
 
@@ -1098,6 +1084,8 @@ onClose();
               contactsError={contactsError}
               contactSearchQuery={contactSearchQuery}
               setContactSearchQuery={setContactSearchQuery}
+              onSaveDraft={handleSaveDraft}
+              isSubmitting={isSubmitting}
             />
           )}
 
@@ -1106,6 +1094,8 @@ onClose();
               formData={formData}
               errors={errors}
               updateField={updateField}
+              onSaveDraft={handleSaveDraft}
+              isSubmitting={isSubmitting}
             />
           )}
         </div>
@@ -1123,17 +1113,6 @@ onClose();
                 {currentStep === 1 ? 'Cancel' : 'Back'}
               </Button>
 
-              {/* ✅ NEW: Manual Save Draft Button */}
-              {!isEditMode && (
-                <Button
-                  variant="secondary"
-                  onClick={handleSaveDraft}
-                  icon={Save}
-                  className="text-sm"
-                >
-                  Save Draft
-                </Button>
-              )}
             </div>
 
             <div className="flex gap-3">
@@ -1180,6 +1159,8 @@ function Step1CampaignDetails({
   verifiedDomains,
   defaultDomain,
   username,
+  onSaveDraft,
+  isSubmitting,
 }: {
   formData: CampaignFormData;
   errors: Record<string, string>;
@@ -1187,6 +1168,8 @@ function Step1CampaignDetails({
   verifiedDomains: VerifiedDomain[];
   defaultDomain: string;
   username: string;
+  onSaveDraft: () => void;
+  isSubmitting: boolean;
 }) {
   const [selectedDomain, setSelectedDomain] = useState(defaultDomain);
   const [localPart, setLocalPart] = useState(username);
@@ -1204,11 +1187,23 @@ function Step1CampaignDetails({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">Campaign Information</h3>
-        <p className="text-gray-600 text-sm mb-6">
-          Provide basic information about your email campaign.
-        </p>
+      {/* Step Header with Save Draft Button */}
+      <div className="flex items-start justify-between pb-4 border-b border-gray-200">
+        <div>
+          <h3 className="text-lg font-semibold mb-2">Campaign Information</h3>
+          <p className="text-gray-600 text-sm">
+            Provide basic information about your email campaign.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onSaveDraft}
+          disabled={isSubmitting}
+          icon={Save}
+        >
+          Save Draft
+        </Button>
       </div>
 
       <div>
@@ -1588,6 +1583,8 @@ function Step3RecipientSelection({
   contactsError,
   contactSearchQuery,
   setContactSearchQuery,
+  onSaveDraft,
+  isSubmitting,
 }: {
   formData: CampaignFormData;
   contacts: Contact[];
@@ -1602,6 +1599,8 @@ function Step3RecipientSelection({
   contactsError: string | null;
   contactSearchQuery: string;
   setContactSearchQuery: (query: string) => void;
+  onSaveDraft: () => void;
+  isSubmitting: boolean;
 }) {
   // ✅ FIX 4: Filter contacts based on search query
   const filteredContacts = contacts.filter(contact => {
@@ -1614,11 +1613,23 @@ function Step3RecipientSelection({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold mb-4">Select Recipients</h3>
-        <p className="text-gray-600 text-sm mb-6">
-          Choose who will receive this campaign.
-        </p>
+      {/* Step Header with Save Draft Button */}
+      <div className="flex items-start justify-between pb-4 border-b border-gray-200">
+        <div>
+          <h3 className="text-lg font-semibold mb-2">Select Recipients</h3>
+          <p className="text-gray-600 text-sm">
+            Choose who will receive this campaign.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onSaveDraft}
+          disabled={isSubmitting}
+          icon={Save}
+        >
+          Save Draft
+        </Button>
       </div>
 
       {errors.recipients && (
@@ -1854,10 +1865,14 @@ function Step4Schedule({
   formData,
   errors,
   updateField,
+  onSaveDraft,
+  isSubmitting,
 }: {
   formData: CampaignFormData;
   errors: Record<string, string>;
   updateField: (field: keyof CampaignFormData, value: any) => void;
+  onSaveDraft: () => void;
+  isSubmitting: boolean;
 }) {
   return (
     <div className="space-y-6">
