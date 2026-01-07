@@ -1165,21 +1165,20 @@ const handleSendNow = async (campaign: Campaign) => {
           />
         )}
         {/* ✅ NEW: CreateCampaignModal in EDIT MODE for draft campaigns */}
-{editingDraftCampaign && (
-  <CreateCampaignModal
-    key={`edit-${editingDraftCampaign.id}`}
-    editingCampaign={editingDraftCampaign}
-    onClose={() => {
-      setEditingDraftCampaign(null);
-    }}
-    onSuccess={(campaign) => {
-      setEditingDraftCampaign(null);
-      fetchCampaigns();
-      toast.success("Campaign updated successfully!");
-    }}
-  />
-)}
-
+        {editingDraftCampaign && (
+          <CreateCampaignModal
+            key={`edit-${editingDraftCampaign.id}`}
+            editingCampaign={editingDraftCampaign}
+            onClose={() => {
+              setEditingDraftCampaign(null);
+            }}
+            onSuccess={(campaign) => {
+              setEditingDraftCampaign(null);
+              fetchCampaigns();
+              toast.success("Campaign updated successfully!");
+            }}
+          />
+        )}
         {/* Send Campaign Modal */}
         {showSendModal && selectedCampaign && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
