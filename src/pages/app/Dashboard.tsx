@@ -1,15 +1,14 @@
 /**
  * ============================================================================
- * Dashboard Component - FIXED WITH GRAPHS
+ * Dashboard Component - FINAL WITH TIME-BASED CHARTS
  * ============================================================================
  * 
- * FIX 7: Improved UX with Quick Start Guide + Original Graphs
- * 
- * This version combines:
+ * FIX 7: Complete analytics dashboard with:
+ * - Time-based charts (not campaign-based)
+ * - Date range selector (Today, Yesterday, Last Week, Last Month, Custom)
+ * - Open count and Click count over time
  * - Quick Start Guide for new users
  * - Setup progress tracking
- * - Original open rate and click rate graphs
- * - Recent campaigns table
  * 
  * ============================================================================
  */
@@ -31,20 +30,22 @@ import {
   Globe,
   BookOpen,
   Zap,
-  MousePointerClick
+  MousePointerClick,
+  Calendar,
+  ChevronDown
 } from 'lucide-react';
-import { AppLayout } from '../../components/app/AppLayout';
-import { Button } from '../../components/ui/Button';
-import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { AppLayout } from '../components/app/AppLayout';
+import { Button } from '../components/ui/Button';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
 interface DashboardStats {
   totalCampaigns: number;
   totalContacts: number;
   emailsSent: number;
-  averageOpenRate: number;
-  averageClickRate: number;
+  totalOpens: number;
+  totalClicks: number;
   recentCampaigns: any[];
 }
 
@@ -55,11 +56,13 @@ interface SetupProgress {
   hasSentCampaign: boolean;
 }
 
-interface ChartDataPoint {
-  name: string;
-  openRate: number;
-  clickRate: number;
+interface TimeSeriesDataPoint {
+  date: string;
+  opens: number;
+  clicks: number;
 }
+
+type DateRange = 'today' | 'yesterday' | 'last7days' | 'last30days' | 'custom';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -70,8 +73,8 @@ export default function Dashboard() {
     totalCampaigns: 0,
     totalContacts: 0,
     emailsSent: 0,
-    averageOpenRate: 0,
-    averageClickRate: 0,
+    totalOpens: 0,
+    totalClicks: 0,
     recentCampaigns: [],
   });
   const [setupProgress, setSetupProgress] = useState<SetupProgress>({
@@ -80,9 +83,15 @@ export default function Dashboard() {
     hasTemplate: false,
     hasSentCampaign: false,
   });
-  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   
-  // ✅ FIX 7: Quick Start Guide state
+  // ✅ NEW: Time series data and date range
+  const [timeSeriesData, setTimeSeriesData] = useState<TimeSeriesDataPoint[]>([]);
+  const [selectedDateRange, setSelectedDateRange] = useState<DateRange>('last7days');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  // Quick Start Guide state
   const [showQuickStart, setShowQuickStart] = useState(false);
   const [quickStartDismissed, setQuickStartDismissed] = useState(false);
 
@@ -92,23 +101,25 @@ export default function Dashboard() {
     checkQuickStartStatus();
   }, [user]);
 
-  // ✅ FIX 7: Check if user has seen Quick Start
+  useEffect(() => {
+    if (user) {
+      loadTimeSeriesData();
+    }
+  }, [user, selectedDateRange, customStartDate, customEndDate]);
+
   async function checkQuickStartStatus() {
     const dismissed = localStorage.getItem(`quickStartDismissed_${user?.id}`);
     setQuickStartDismissed(dismissed === 'true');
     
-    // Show Quick Start for new users automatically
     if (!dismissed) {
       setTimeout(() => setShowQuickStart(true), 1000);
     }
   }
 
-  // ✅ FIX 7: Check user's setup progress
   async function checkSetupProgress() {
     if (!user) return;
 
     try {
-      // Check for verified domain
       const { data: domains } = await supabase
         .from('sending_domains')
         .select('verification_status')
@@ -116,20 +127,17 @@ export default function Dashboard() {
         .eq('verification_status', 'verified')
         .limit(1);
 
-      // Check for contacts
       const { data: contacts, count: contactCount } = await supabase
         .from('contacts')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      // Check for templates
       const { data: templates } = await supabase
         .from('templates')
         .select('id')
         .eq('user_id', user.id)
         .limit(1);
 
-      // Check for sent campaigns
       const { data: campaigns } = await supabase
         .from('campaigns')
         .select('status')
@@ -167,33 +175,36 @@ export default function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      // Calculate stats
+      // Calculate total opens and clicks from campaign_analytics
+      let totalOpens = 0;
+      let totalClicks = 0;
+
+      if (campaigns && campaigns.length > 0) {
+        const campaignIds = campaigns.map(c => c.id);
+        
+        // Get analytics data
+        const { data: analytics } = await supabase
+          .from('campaign_analytics')
+          .select('event_type')
+          .in('campaign_id', campaignIds);
+
+        if (analytics) {
+          totalOpens = analytics.filter(a => a.event_type === 'open').length;
+          totalClicks = analytics.filter(a => a.event_type === 'click').length;
+        }
+      }
+
       const totalCampaigns = campaigns?.length || 0;
       const emailsSent = campaigns?.reduce((sum, c) => sum + (c.recipients_count || 0), 0) || 0;
-      const avgOpenRate = campaigns && campaigns.length > 0
-        ? campaigns.reduce((sum, c) => sum + (c.open_rate || 0), 0) / campaigns.length
-        : 0;
-      const avgClickRate = campaigns && campaigns.length > 0
-        ? campaigns.reduce((sum, c) => sum + (c.click_rate || 0), 0) / campaigns.length
-        : 0;
-
-      // Prepare chart data (last 7 campaigns)
-      const chartCampaigns = campaigns?.slice(0, 7).reverse() || [];
-      const chartDataPoints: ChartDataPoint[] = chartCampaigns.map(campaign => ({
-        name: campaign.name.length > 15 ? campaign.name.substring(0, 15) + '...' : campaign.name,
-        openRate: campaign.open_rate || 0,
-        clickRate: campaign.click_rate || 0,
-      }));
 
       setStats({
         totalCampaigns,
         totalContacts: contactCount || 0,
         emailsSent,
-        averageOpenRate: avgOpenRate,
-        averageClickRate: avgClickRate,
+        totalOpens,
+        totalClicks,
         recentCampaigns: campaigns?.slice(0, 5) || [],
       });
-      setChartData(chartDataPoints);
     } catch (error: any) {
       console.error('Failed to load dashboard:', error);
       toast.error('Failed to load dashboard data');
@@ -202,7 +213,145 @@ export default function Dashboard() {
     }
   }
 
-  // ✅ FIX 7: Handle Quick Start dismissal
+  // ✅ NEW: Load time series data based on date range
+  async function loadTimeSeriesData() {
+    if (!user) return;
+
+    try {
+      const { startDate, endDate } = getDateRangeBounds();
+
+      // Fetch campaign analytics within date range
+      const { data: analytics } = await supabase
+        .from('campaign_analytics')
+        .select('event_type, created_at, campaign_id')
+        .gte('created_at', startDate)
+        .lte('created_at', endDate)
+        .order('created_at', { ascending: true });
+
+      if (!analytics || analytics.length === 0) {
+        setTimeSeriesData([]);
+        return;
+      }
+
+      // Group by date
+      const dataByDate = new Map<string, { opens: number; clicks: number }>();
+
+      // Initialize all dates in range with zero values
+      const dates = generateDateRange(startDate, endDate);
+      dates.forEach(date => {
+        dataByDate.set(date, { opens: 0, clicks: 0 });
+      });
+
+      // Populate with actual data
+      analytics.forEach(event => {
+        const date = new Date(event.created_at).toISOString().split('T')[0];
+        const current = dataByDate.get(date) || { opens: 0, clicks: 0 };
+        
+        if (event.event_type === 'open') {
+          current.opens++;
+        } else if (event.event_type === 'click') {
+          current.clicks++;
+        }
+        
+        dataByDate.set(date, current);
+      });
+
+      // Convert to array
+      const timeSeriesArray: TimeSeriesDataPoint[] = Array.from(dataByDate.entries()).map(
+        ([date, data]) => ({
+          date,
+          opens: data.opens,
+          clicks: data.clicks,
+        })
+      );
+
+      setTimeSeriesData(timeSeriesArray);
+    } catch (error) {
+      console.error('Failed to load time series data:', error);
+      setTimeSeriesData([]);
+    }
+  }
+
+  // ✅ NEW: Generate date range array
+  function generateDateRange(start: string, end: string): string[] {
+    const dates: string[] = [];
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+
+    let currentDate = new Date(startDate);
+    while (currentDate <= endDate) {
+      dates.push(currentDate.toISOString().split('T')[0]);
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return dates;
+  }
+
+  // ✅ NEW: Get date range bounds based on selection
+  function getDateRangeBounds(): { startDate: string; endDate: string } {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let startDate: Date;
+    let endDate: Date = new Date(today);
+    endDate.setHours(23, 59, 59, 999);
+
+    switch (selectedDateRange) {
+      case 'today':
+        startDate = new Date(today);
+        break;
+      case 'yesterday':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 1);
+        endDate = new Date(startDate);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'last7days':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 6);
+        break;
+      case 'last30days':
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 29);
+        break;
+      case 'custom':
+        if (customStartDate && customEndDate) {
+          startDate = new Date(customStartDate);
+          endDate = new Date(customEndDate);
+          endDate.setHours(23, 59, 59, 999);
+        } else {
+          startDate = new Date(today);
+          startDate.setDate(startDate.getDate() - 6);
+        }
+        break;
+      default:
+        startDate = new Date(today);
+        startDate.setDate(startDate.getDate() - 6);
+    }
+
+    return {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+    };
+  }
+
+  // ✅ NEW: Format date for display
+  function formatDateForDisplay(dateStr: string): string {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else if (selectedDateRange === 'last7days' || selectedDateRange === 'last30days') {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } else {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
   function handleDismissQuickStart(permanent: boolean) {
     setShowQuickStart(false);
     if (permanent) {
@@ -211,7 +360,25 @@ export default function Dashboard() {
     }
   }
 
-  // Calculate setup completion percentage
+  // ✅ NEW: Handle date range change
+  function handleDateRangeChange(range: DateRange) {
+    setSelectedDateRange(range);
+    if (range !== 'custom') {
+      setShowDatePicker(false);
+    }
+  }
+
+  // ✅ NEW: Apply custom date range
+  function applyCustomDateRange() {
+    if (customStartDate && customEndDate) {
+      setSelectedDateRange('custom');
+      setShowDatePicker(false);
+      loadTimeSeriesData();
+    } else {
+      toast.error('Please select both start and end dates');
+    }
+  }
+
   const setupSteps = Object.values(setupProgress);
   const completedSteps = setupSteps.filter(Boolean).length;
   const setupPercentage = (completedSteps / setupSteps.length) * 100;
@@ -224,11 +391,11 @@ export default function Dashboard() {
         <div className="mb-8">
           <h1 className="text-3xl font-serif font-bold">Dashboard</h1>
           <p className="text-gray-600 mt-1">
-            Welcome back! Here's your email campaign overview.
+            Welcome back! Here's your email campaign analytics.
           </p>
         </div>
 
-        {/* ✅ FIX 7: Setup Progress Card (for users who haven't completed setup) */}
+        {/* Setup Progress Card */}
         {!isSetupComplete && (
           <div className="bg-gradient-to-r from-purple to-gold/80 rounded-lg p-6 mb-8 text-white shadow-lg">
             <div className="flex items-start justify-between mb-4">
@@ -250,7 +417,6 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Progress Bar */}
             <div className="bg-white/20 rounded-full h-3 overflow-hidden mb-4">
               <div
                 className="bg-white h-full transition-all duration-500 rounded-full"
@@ -258,7 +424,6 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Setup Checklist */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <SetupChecklistItem
                 completed={setupProgress.hasVerifiedDomain}
@@ -289,7 +454,7 @@ export default function Dashboard() {
         )}
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <StatCard
             icon={<Mail size={24} />}
             title="Total Campaigns"
@@ -313,37 +478,143 @@ export default function Dashboard() {
           />
           <StatCard
             icon={<BarChart size={24} />}
-            title="Avg. Open Rate"
-            value={`${Math.round(stats.averageOpenRate)}%`}
+            title="Total Opens"
+            value={stats.totalOpens}
             iconColor="text-blue-600"
             bgColor="bg-blue-100"
           />
+          <StatCard
+            icon={<MousePointerClick size={24} />}
+            title="Total Clicks"
+            value={stats.totalClicks}
+            iconColor="text-purple"
+            bgColor="bg-purple/10"
+          />
         </div>
 
-        {/* ✅ ORIGINAL: Charts Section */}
-        {chartData.length > 0 && (
+        {/* ✅ NEW: Date Range Selector */}
+        <div className="bg-white rounded-lg border-2 border-black shadow-lg p-4 mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-2">
+              <Calendar size={20} className="text-gray-600" />
+              <span className="font-semibold text-gray-700">Time Period:</span>
+            </div>
+            
+            <div className="flex items-center gap-2 flex-wrap">
+              <DateRangeButton
+                active={selectedDateRange === 'today'}
+                onClick={() => handleDateRangeChange('today')}
+                label="Today"
+              />
+              <DateRangeButton
+                active={selectedDateRange === 'yesterday'}
+                onClick={() => handleDateRangeChange('yesterday')}
+                label="Yesterday"
+              />
+              <DateRangeButton
+                active={selectedDateRange === 'last7days'}
+                onClick={() => handleDateRangeChange('last7days')}
+                label="Last 7 Days"
+              />
+              <DateRangeButton
+                active={selectedDateRange === 'last30days'}
+                onClick={() => handleDateRangeChange('last30days')}
+                label="Last 30 Days"
+              />
+              <button
+                onClick={() => setShowDatePicker(!showDatePicker)}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                  selectedDateRange === 'custom'
+                    ? 'bg-purple text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Custom Range
+                <ChevronDown size={16} />
+              </button>
+            </div>
+          </div>
+
+          {/* Custom Date Picker */}
+          {showDatePicker && (
+            <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    min={customStartDate}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple focus:border-transparent"
+                  />
+                </div>
+                <button
+                  onClick={applyCustomDateRange}
+                  className="px-6 py-2 bg-purple text-white rounded-lg font-medium hover:bg-purple/90 transition-colors"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ✅ NEW: Time-Based Charts */}
+        {timeSeriesData.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Open Rate Chart */}
+            {/* Opens Over Time */}
             <div className="bg-white rounded-lg border-2 border-black shadow-lg p-6">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <TrendingUp size={20} className="text-blue-600" />
-                Open Rate Trends
+                Opens Over Time
               </h3>
               <div className="h-64">
-                <SimpleBarChart data={chartData} dataKey="openRate" color="#3b82f6" />
+                <TimeSeriesChart
+                  data={timeSeriesData}
+                  dataKey="opens"
+                  color="#3b82f6"
+                  formatDate={formatDateForDisplay}
+                />
               </div>
             </div>
 
-            {/* Click Rate Chart */}
+            {/* Clicks Over Time */}
             <div className="bg-white rounded-lg border-2 border-black shadow-lg p-6">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                 <MousePointerClick size={20} className="text-purple" />
-                Click Rate Trends
+                Clicks Over Time
               </h3>
               <div className="h-64">
-                <SimpleBarChart data={chartData} dataKey="clickRate" color="#9333ea" />
+                <TimeSeriesChart
+                  data={timeSeriesData}
+                  dataKey="clicks"
+                  color="#9333ea"
+                  formatDate={formatDateForDisplay}
+                />
               </div>
             </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border-2 border-black shadow-lg p-12 mb-8 text-center">
+            <BarChart size={48} className="mx-auto text-gray-300 mb-4" />
+            <p className="text-gray-600 mb-2 font-medium">No analytics data available</p>
+            <p className="text-sm text-gray-500">
+              Send some campaigns to see your analytics here
+            </p>
           </div>
         )}
 
@@ -384,12 +655,6 @@ export default function Dashboard() {
                       Recipients
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Open Rate
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Click Rate
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Sent Date
                     </th>
                   </tr>
@@ -413,12 +678,6 @@ export default function Dashboard() {
                         {campaign.recipients_count || 0}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {campaign.open_rate ? `${Math.round(campaign.open_rate)}%` : '-'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {campaign.click_rate ? `${Math.round(campaign.click_rate)}%` : '-'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {campaign.sent_at
                           ? new Date(campaign.sent_at).toLocaleDateString()
                           : '-'}
@@ -432,7 +691,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ✅ FIX 7: Quick Start Modal */}
+      {/* Quick Start Modal */}
       {showQuickStart && !quickStartDismissed && (
         <QuickStartGuide
           onClose={() => handleDismissQuickStart(false)}
@@ -445,16 +704,17 @@ export default function Dashboard() {
 }
 
 // ============================================================================
-// ✅ ORIGINAL: SIMPLE BAR CHART COMPONENT
+// ✅ NEW: TIME SERIES CHART COMPONENT
 // ============================================================================
 
-interface SimpleBarChartProps {
-  data: ChartDataPoint[];
-  dataKey: 'openRate' | 'clickRate';
+interface TimeSeriesChartProps {
+  data: TimeSeriesDataPoint[];
+  dataKey: 'opens' | 'clicks';
   color: string;
+  formatDate: (date: string) => string;
 }
 
-function SimpleBarChart({ data, dataKey, color }: SimpleBarChartProps) {
+function TimeSeriesChart({ data, dataKey, color, formatDate }: TimeSeriesChartProps) {
   if (data.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-gray-400">
@@ -463,42 +723,75 @@ function SimpleBarChart({ data, dataKey, color }: SimpleBarChartProps) {
     );
   }
 
-  const maxValue = Math.max(...data.map(d => d[dataKey]), 10);
+  const maxValue = Math.max(...data.map(d => d[dataKey]), 1);
   const scale = 100 / maxValue;
 
   return (
-    <div className="h-full flex items-end justify-between gap-2 px-4">
-      {data.map((point, index) => {
-        const height = point[dataKey] * scale;
-        return (
-          <div key={index} className="flex-1 flex flex-col items-center gap-2">
-            <div className="w-full flex items-end justify-center" style={{ height: '200px' }}>
-              <div
-                className="w-full rounded-t-lg transition-all duration-300 hover:opacity-80 relative group"
-                style={{
-                  height: `${height}%`,
-                  backgroundColor: color,
-                  minHeight: point[dataKey] > 0 ? '4px' : '0px',
-                }}
-              >
-                {/* Tooltip on hover */}
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                  {point[dataKey].toFixed(1)}%
+    <div className="h-full flex flex-col">
+      {/* Chart Area */}
+      <div className="flex-1 flex items-end justify-between gap-2 px-4">
+        {data.map((point, index) => {
+          const height = point[dataKey] * scale;
+          return (
+            <div key={index} className="flex-1 flex flex-col items-center gap-2">
+              <div className="w-full flex items-end justify-center" style={{ height: '200px' }}>
+                <div
+                  className="w-full rounded-t-lg transition-all duration-300 hover:opacity-80 relative group"
+                  style={{
+                    height: `${height}%`,
+                    backgroundColor: color,
+                    minHeight: point[dataKey] > 0 ? '4px' : '0px',
+                  }}
+                >
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                    {point[dataKey]} {dataKey}
+                  </div>
                 </div>
               </div>
+              <div className="text-xs text-gray-600 text-center truncate w-full">
+                {formatDate(point.date)}
+              </div>
             </div>
-            <div className="text-xs text-gray-600 text-center truncate w-full">
-              {point.name}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
+      {/* Y-Axis Label */}
+      <div className="mt-4 text-center text-sm text-gray-500">
+        Total {dataKey === 'opens' ? 'Opens' : 'Clicks'}: {data.reduce((sum, d) => sum + d[dataKey], 0)}
+      </div>
     </div>
   );
 }
 
 // ============================================================================
-// ✅ FIX 7: SETUP CHECKLIST ITEM COMPONENT
+// ✅ NEW: DATE RANGE BUTTON COMPONENT
+// ============================================================================
+
+interface DateRangeButtonProps {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}
+
+function DateRangeButton({ active, onClick, label }: DateRangeButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+        active
+          ? 'bg-purple text-white'
+          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ============================================================================
+// SETUP CHECKLIST ITEM COMPONENT
 // ============================================================================
 
 interface SetupChecklistItemProps {
@@ -525,7 +818,7 @@ function SetupChecklistItem({ completed, title, onClick }: SetupChecklistItemPro
 }
 
 // ============================================================================
-// ✅ FIX 7: QUICK START GUIDE MODAL
+// QUICK START GUIDE MODAL
 // ============================================================================
 
 interface QuickStartGuideProps {
@@ -587,7 +880,6 @@ function QuickStartGuide({ onClose, onDismissPermanently, setupProgress }: Quick
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden border-2 border-black">
-        {/* Header */}
         <div className="border-b-2 border-black p-6 bg-gradient-to-r from-purple to-gold/80">
           <div className="flex items-center justify-between">
             <div className="text-white">
@@ -607,7 +899,6 @@ function QuickStartGuide({ onClose, onDismissPermanently, setupProgress }: Quick
           </div>
         </div>
 
-        {/* Content */}
         <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
           <div className="space-y-4">
             {steps.map((step, index) => (
@@ -656,7 +947,6 @@ function QuickStartGuide({ onClose, onDismissPermanently, setupProgress }: Quick
             ))}
           </div>
 
-          {/* Help Resources */}
           <div className="mt-8 p-6 bg-blue-50 border-2 border-blue-200 rounded-lg">
             <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
               <AlertCircle size={20} />
@@ -674,7 +964,6 @@ function QuickStartGuide({ onClose, onDismissPermanently, setupProgress }: Quick
           </div>
         </div>
 
-        {/* Footer */}
         <div className="border-t-2 border-black p-6 bg-gray-50 flex items-center justify-between">
           <button
             onClick={onDismissPermanently}
