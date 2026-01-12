@@ -10,6 +10,7 @@ import { SignupPage } from './pages/SignupPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import PasswordResetSuccessPage from './pages/PasswordResetSuccessPage';
+import EmailConfirmedPage from './pages/EmailConfirmedPage';
 
 import Dashboard from './pages/app/Dashboard';
 import { Contacts } from './pages/app/Contacts';
@@ -76,6 +77,7 @@ function App() {
         <AdminAuthProvider>
           <Routes>
             {/* Public Routes */}
+            
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
@@ -84,6 +86,9 @@ function App() {
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/password-reset-success" element={<PasswordResetSuccessPage />} />
+
+            {/* Email Confirmation Handler */}
+            <Route path="/auth/confirm" element={<EmailConfirmedPage />} />
 
             {/* Protected App Routes */}
             <Route
