@@ -4,7 +4,7 @@
  * Provides authentication state and methods throughout the application.
  * Handles user signup, login, logout, session management, and password reset.
  * 
- * UPDATED: Added password reset functionality
+ * UPDATED: Email verification required for signup
  */
 
 import { createContext, useContext, useEffect, useState } from 'react';
@@ -109,62 +109,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Sign Up Function
+   * Sign Up Function - WITH EMAIL VERIFICATION
    * 
-   * Creates a new user account and automatically logs them in.
+   * Creates a new user account and requires email verification before access.
+   * 
+   * Flow:
+   * 1. Create account with Supabase Auth
+   * 2. Send verification email
+   * 3. Show "Check your email" message
+   * 4. User must click link in email to verify
+   * 5. After verification, user can sign in
    */
   const signUp = async (email: string, password: string, fullName: string) => {
     try {
-      // Step 1: Create the account
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
             full_name: fullName,
           },
+          emailRedirectTo: `${window.location.origin}/login`,
         },
       });
 
-      if (signUpError) throw signUpError;
+      if (error) throw error;
 
-      if (!signUpData.user) {
+      if (!data.user) {
         throw new Error('Signup failed - no user returned');
       }
 
-      // Step 2: Automatically sign in the user
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (signInError) {
-        // If auto-login fails, show message but don't fail signup
-        console.error('Auto-login failed:', signInError);
-        toast.success('Account created! Please log in.');
+      // Check if email confirmation is required
+      if (data.user && !data.session) {
+        // Email confirmation required
+        toast.success('Account created! Please check your email to verify your account.', {
+          duration: 6000,
+        });
         navigate('/login');
-        return;
-      }
-
-      // Step 3: Set user state
-      setUser(signInData.user);
-
-      // Step 4: Fetch profile
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', signInData.user.id)
-        .single();
-
-      if (profileError) {
-        console.error('Error fetching profile:', profileError);
       } else {
-        setProfile(profileData);
-      }
+        // Email confirmation disabled (auto-confirmed)
+        toast.success('Account created! Logging you in...');
+        
+        // User is auto-confirmed, set state and redirect
+        setUser(data.user);
+        
+        // Fetch profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
 
-      // Step 5: Show success and redirect to dashboard
-      toast.success('Welcome to Email Wizard! 🎉');
-      navigate('/app/dashboard');
+        if (!profileError && profileData) {
+          setProfile(profileData);
+        }
+        
+        navigate('/app/dashboard');
+      }
       
     } catch (error: any) {
       console.error('Signup error:', error);
@@ -184,7 +185,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
       });
 
-      if (error) throw error;
+      if (error) {
+        // Check if error is due to unverified email
+        if (error.message.includes('Email not confirmed')) {
+          throw new Error('Please verify your email before signing in. Check your inbox for the verification link.');
+        }
+        throw error;
+      }
 
       setUser(data.user);
       

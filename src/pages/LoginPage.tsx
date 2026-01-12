@@ -4,6 +4,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { useAuth } from '../contexts/AuthContext';
 import { Logo } from '../components/ui/Logo';
+import ResendVerificationEmail from '../components/ResendVerificationEmail';
 
 export const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -69,7 +70,7 @@ export const LoginPage = () => {
               required
             />
 
-            {/* FORGOT PASSWORD LINK - NEW */}
+            {/* Forgot Password Link */}
             <div className="flex items-center justify-between">
               <Link
                 to="/forgot-password"
@@ -98,6 +99,10 @@ export const LoginPage = () => {
             </a>
           </div>
         </div>
+
+        {/* Resend Verification Email Button */}
+        <ResendVerificationEmail />
+
       </div>
     </div>
   );
