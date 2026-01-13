@@ -29,6 +29,8 @@ import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminSystemPage } from './pages/admin/AdminSystemPage';
 import { AdminLayout } from './components/admin/AdminLayout';
+import VerifyEmailOTPPage from './pages/VerifyEmailOTPPage';
+
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -85,6 +87,7 @@ function App() {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/verify-email-otp" element={<VerifyEmailOTPPage />} />
 
             {/* Password Reset Routes */}
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

@@ -1,10 +1,8 @@
 /**
- * Authentication Context
+ * Authentication Context - OTP Email Verification
  * 
- * Provides authentication state and methods throughout the application.
- * Handles user signup, login, logout, session management, and password reset.
- * 
- * UPDATED: Email verification required for signup
+ * Updated to use OTP code verification instead of email links.
+ * Prevents link prefetching issues with Gmail and other providers.
  */
 
 import { createContext, useContext, useEffect, useState } from 'react';
@@ -109,16 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
-   * Sign Up Function - WITH EMAIL VERIFICATION
+   * Sign Up Function - OTP Email Verification
    * 
-   * Creates a new user account and requires email verification before access.
-   * 
-   * Flow:
-   * 1. Create account with Supabase Auth
-   * 2. Send verification email
-   * 3. Show "Check your email" message
-   * 4. User must click link in email to verify
-   * 5. After verification, user can sign in
+   * Creates account and redirects to OTP verification page.
+   * User receives 6-digit code via email instead of link.
    */
   const signUp = async (email: string, password: string, fullName: string) => {
     try {
@@ -129,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: {
             full_name: fullName,
           },
-          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+          // No emailRedirectTo needed - using OTP instead!
         },
       });
 
@@ -141,16 +133,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Check if email confirmation is required
       if (data.user && !data.session) {
-        // Email confirmation required
-        toast.success('Account created! Please check your email to verify your account.', {
-          duration: 6000,
+        // Email confirmation required - redirect to OTP page
+        toast.success('Account created! Check your email for verification code.', {
+          duration: 5000,
         });
-        navigate('/login');
+        
+        // Redirect to OTP verification page with email
+        navigate('/verify-email-otp', { 
+          state: { email: email },
+          replace: true 
+        });
       } else {
-        // Email confirmation disabled (auto-confirmed)
+        // Email confirmation disabled - auto-confirmed
         toast.success('Account created! Logging you in...');
         
-        // User is auto-confirmed, set state and redirect
         setUser(data.user);
         
         // Fetch profile
@@ -187,8 +183,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) {
         // Check if error is due to unverified email
-        if (error.message.includes('Email not confirmed')) {
-          throw new Error('Please verify your email before signing in. Check your inbox for the verification link.');
+        if (error.message?.includes('Email not confirmed')) {
+          throw new Error('Please verify your email before signing in. Check your inbox for the verification code.');
         }
         throw error;
       }
