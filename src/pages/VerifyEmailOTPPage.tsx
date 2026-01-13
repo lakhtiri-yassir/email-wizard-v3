@@ -1,8 +1,9 @@
 /**
  * Email Verification with OTP Code
+ * FIXED: Prevents duplicate verification attempts
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
@@ -15,6 +16,8 @@ export default function VerifyEmailOTPPage() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [email, setEmail] = useState('');
+  const [verified, setVerified] = useState(false); // Track if already verified
+  const verifyingRef = useRef(false); // Prevent duplicate calls
 
   useEffect(() => {
     const stateEmail = location.state?.email;
@@ -32,11 +35,17 @@ export default function VerifyEmailOTPPage() {
   }, [location, navigate]);
 
   const handleVerify = async (code: string) => {
+    // Prevent duplicate submissions
+    if (verifyingRef.current || verified || loading) {
+      return;
+    }
+
     if (code.length !== 6) {
       toast.error('Please enter a 6-digit code');
       return;
     }
 
+    verifyingRef.current = true;
     setLoading(true);
 
     try {
@@ -49,6 +58,7 @@ export default function VerifyEmailOTPPage() {
       if (error) throw error;
 
       if (data.user) {
+        setVerified(true); // Mark as verified
         toast.success('Email verified successfully! 🎉', {
           duration: 4000,
         });
@@ -60,17 +70,21 @@ export default function VerifyEmailOTPPage() {
     } catch (error: any) {
       console.error('OTP verification error:', error);
       
-      if (error.message?.includes('expired')) {
-        toast.error('Code has expired. Please request a new one.');
-      } else if (error.message?.includes('invalid')) {
-        toast.error('Invalid code. Please check and try again.');
-      } else {
-        toast.error(error.message || 'Verification failed. Please try again.');
+      // Only show error if not already verified
+      if (!verified) {
+        if (error.message?.includes('expired')) {
+          toast.error('Code has expired. Please request a new one.');
+        } else if (error.message?.includes('invalid')) {
+          toast.error('Invalid code. Please check and try again.');
+        } else {
+          toast.error(error.message || 'Verification failed. Please try again.');
+        }
       }
       
       setOtp('');
     } finally {
       setLoading(false);
+      verifyingRef.current = false;
     }
   };
 
@@ -93,6 +107,10 @@ export default function VerifyEmailOTPPage() {
       toast.success('New verification code sent! Check your email.', {
         duration: 5000,
       });
+      
+      // Reset verification state so user can try new code
+      setVerified(false);
+      setOtp('');
     } catch (error: any) {
       console.error('Resend error:', error);
       toast.error('Failed to resend code. Please try again.');
@@ -121,13 +139,13 @@ export default function VerifyEmailOTPPage() {
               value={otp}
               onChange={setOtp}
               onComplete={handleVerify}
-              disabled={loading}
+              disabled={loading || verified}
             />
           </div>
 
           <button
             onClick={() => handleVerify(otp)}
-            disabled={loading || otp.length !== 6}
+            disabled={loading || otp.length !== 6 || verified}
             className="w-full bg-yellow-400 text-black font-semibold py-3 px-4 rounded-md hover:bg-yellow-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center mb-4"
           >
             {loading ? (
@@ -138,20 +156,24 @@ export default function VerifyEmailOTPPage() {
                 </svg>
                 Verifying...
               </>
+            ) : verified ? (
+              'Verified! Redirecting...'
             ) : (
               'Verify Email'
             )}
           </button>
 
-          <div className="text-center">
-            <button
-              onClick={handleResendCode}
-              disabled={resending}
-              className="text-sm text-gray-600 hover:text-gray-900 hover:underline disabled:opacity-50"
-            >
-              {resending ? 'Sending...' : "Didn't receive the code? Resend"}
-            </button>
-          </div>
+          {!verified && (
+            <div className="text-center">
+              <button
+                onClick={handleResendCode}
+                disabled={resending}
+                className="text-sm text-gray-600 hover:text-gray-900 hover:underline disabled:opacity-50"
+              >
+                {resending ? 'Sending...' : "Didn't receive the code? Resend"}
+              </button>
+            </div>
+          )}
 
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
             <p className="text-xs text-blue-900">
