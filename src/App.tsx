@@ -11,9 +11,6 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import PasswordResetSuccessPage from './pages/PasswordResetSuccessPage';
 
-// Auth Callback Handler - NEW
-import AuthCallbackHandler from './components/AuthCallbackHandler';
-
 import Dashboard from './pages/app/Dashboard';
 import { Contacts } from './pages/app/Contacts';
 import { Campaigns } from './pages/app/Campaigns';
@@ -79,9 +76,6 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <AdminAuthProvider>
-          {/* Auth Callback Handler - intercepts hash-based redirects */}
-          <AuthCallbackHandler />
-          
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<LandingPage />} />

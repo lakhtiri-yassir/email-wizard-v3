@@ -1,15 +1,11 @@
 /**
  * Email Verification with OTP Code
- * 
- * Modern email verification flow using 6-digit OTP codes.
- * No link prefetching issues!
  */
 
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-import { Logo } from '../components/ui/Logo';
 import OTPInput from '../components/OTPInput';
 
 export default function VerifyEmailOTPPage() {
@@ -21,7 +17,6 @@ export default function VerifyEmailOTPPage() {
   const [email, setEmail] = useState('');
 
   useEffect(() => {
-    // Get email from navigation state or query params
     const stateEmail = location.state?.email;
     const queryEmail = new URLSearchParams(location.search).get('email');
     
@@ -45,7 +40,6 @@ export default function VerifyEmailOTPPage() {
     setLoading(true);
 
     try {
-      // Verify OTP with Supabase
       const { data, error } = await supabase.auth.verifyOtp({
         email: email,
         token: code,
@@ -59,7 +53,6 @@ export default function VerifyEmailOTPPage() {
           duration: 4000,
         });
         
-        // Redirect to login
         setTimeout(() => {
           navigate('/login');
         }, 1000);
@@ -75,7 +68,7 @@ export default function VerifyEmailOTPPage() {
         toast.error(error.message || 'Verification failed. Please try again.');
       }
       
-      setOtp(''); // Clear the OTP input on error
+      setOtp('');
     } finally {
       setLoading(false);
     }
@@ -90,7 +83,6 @@ export default function VerifyEmailOTPPage() {
     setResending(true);
 
     try {
-      // Resend OTP
       const { error } = await supabase.auth.resend({
         type: 'signup',
         email: email,
@@ -112,15 +104,7 @@ export default function VerifyEmailOTPPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-white flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="flex justify-center mb-6">
-            <Logo 
-              variant="full" 
-              size="lg"
-              onClick={() => navigate('/')}
-            />
-          </div>
           <h1 className="text-3xl font-serif font-bold mb-2">Verify Your Email</h1>
           <p className="text-gray-600">
             We've sent a 6-digit code to<br />
@@ -128,9 +112,7 @@ export default function VerifyEmailOTPPage() {
           </p>
         </div>
 
-        {/* Card */}
         <div className="bg-white rounded-lg shadow-lg p-8">
-          {/* OTP Input */}
           <div className="mb-6">
             <label className="block text-sm font-semibold text-gray-700 mb-3 text-center">
               Enter Verification Code
@@ -143,7 +125,6 @@ export default function VerifyEmailOTPPage() {
             />
           </div>
 
-          {/* Verify Button */}
           <button
             onClick={() => handleVerify(otp)}
             disabled={loading || otp.length !== 6}
@@ -162,7 +143,6 @@ export default function VerifyEmailOTPPage() {
             )}
           </button>
 
-          {/* Resend Code */}
           <div className="text-center">
             <button
               onClick={handleResendCode}
@@ -173,7 +153,6 @@ export default function VerifyEmailOTPPage() {
             </button>
           </div>
 
-          {/* Help Text */}
           <div className="mt-6 p-4 bg-blue-50 rounded-lg">
             <p className="text-xs text-blue-900">
               <span className="font-semibold">💡 Tip:</span> Check your spam folder if you don't see the email within a few minutes.
@@ -181,7 +160,6 @@ export default function VerifyEmailOTPPage() {
           </div>
         </div>
 
-        {/* Back to Signup */}
         <div className="mt-6 text-center">
           <button
             onClick={() => navigate('/signup')}

@@ -2,7 +2,6 @@
  * OTP Input Component
  * 
  * 6-digit OTP input with auto-focus, paste support, and keyboard navigation.
- * Provides excellent UX for entering verification codes.
  */
 
 import { useRef, useEffect, KeyboardEvent, ClipboardEvent } from 'react';
@@ -25,21 +24,18 @@ export default function OTPInput({
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
-    // Focus first input on mount
     if (inputRefs.current[0] && !disabled) {
       inputRefs.current[0].focus();
     }
   }, [disabled]);
 
   useEffect(() => {
-    // Call onComplete when all digits are filled
     if (value.length === length && onComplete) {
       onComplete(value);
     }
   }, [value, length, onComplete]);
 
   const handleChange = (index: number, digit: string) => {
-    // Only allow single digits
     if (digit && !/^\d$/.test(digit)) return;
 
     const newValue = value.split('');
@@ -48,24 +44,20 @@ export default function OTPInput({
     
     onChange(updatedValue);
 
-    // Auto-focus next input
     if (digit && index < length - 1) {
       inputRefs.current[index + 1]?.focus();
     }
   };
 
   const handleKeyDown = (index: number, e: KeyboardEvent<HTMLInputElement>) => {
-    // Handle backspace
     if (e.key === 'Backspace') {
       e.preventDefault();
       
       if (value[index]) {
-        // Clear current digit
         const newValue = value.split('');
         newValue[index] = '';
         onChange(newValue.join(''));
       } else if (index > 0) {
-        // Move to previous input and clear it
         const newValue = value.split('');
         newValue[index - 1] = '';
         onChange(newValue.join(''));
@@ -73,19 +65,16 @@ export default function OTPInput({
       }
     }
 
-    // Handle left arrow
     if (e.key === 'ArrowLeft' && index > 0) {
       e.preventDefault();
       inputRefs.current[index - 1]?.focus();
     }
 
-    // Handle right arrow
     if (e.key === 'ArrowRight' && index < length - 1) {
       e.preventDefault();
       inputRefs.current[index + 1]?.focus();
     }
 
-    // Handle delete
     if (e.key === 'Delete') {
       e.preventDefault();
       const newValue = value.split('');
@@ -99,22 +88,18 @@ export default function OTPInput({
     
     const pastedData = e.clipboardData.getData('text/plain').trim();
     
-    // Only accept numeric strings
     if (!/^\d+$/.test(pastedData)) {
       return;
     }
 
-    // Take only the required length
     const digits = pastedData.slice(0, length);
     onChange(digits);
 
-    // Focus the last filled input or the next empty one
     const focusIndex = Math.min(digits.length, length - 1);
     inputRefs.current[focusIndex]?.focus();
   };
 
   const handleFocus = (index: number) => {
-    // Select the content on focus for easy replacement
     inputRefs.current[index]?.select();
   };
 
