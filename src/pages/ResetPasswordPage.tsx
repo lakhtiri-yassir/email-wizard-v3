@@ -81,7 +81,7 @@ export default function ResetPasswordPage() {
         toast.error('Reset link expired. Please request a new one.');
         setTimeout(() => navigate('/forgot-password'), 2000);
       } else {
-        toast.error('wal9lawi');
+        toast.error('Error: New password should be different from the old password.');
       }
     } finally {
       setLoading(false);
