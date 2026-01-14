@@ -1,0 +1,63 @@
+/* src/styles/tour.css */
+/* Custom styling for Driver.js tour */
+
+.email-wizard-tour-popover {
+  background: white !important;
+  border: 2px solid #f3ba42 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
+}
+
+.driver-popover-title {
+  font-family: 'DM Serif Display', serif !important;
+  color: #57377d !important;
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+}
+
+.driver-popover-description {
+  font-family: 'DM Sans', sans-serif !important;
+  color: #333 !important;
+  font-size: 1rem !important;
+  line-height: 1.6 !important;
+}
+
+.driver-popover-progress-text {
+  font-family: 'DM Sans', sans-serif !important;
+  color: #57377d !important;
+  font-weight: 600 !important;
+}
+
+.driver-popover-next-btn {
+  background: #f3ba42 !important;
+  color: black !important;
+  border: 1px solid black !important;
+  border-radius: 9999px !important;
+  padding: 0.5rem 1.5rem !important;
+  font-family: 'DM Sans', sans-serif !important;
+  font-weight: 600 !important;
+  transition: all 0.2s !important;
+}
+
+.driver-popover-next-btn:hover {
+  background: #e0a832 !important;
+  transform: translateY(-1px) !important;
+}
+
+.driver-popover-prev-btn {
+  background: white !important;
+  color: #57377d !important;
+  border: 1px solid #57377d !important;
+  border-radius: 9999px !important;
+  padding: 0.5rem 1.5rem !important;
+  font-family: 'DM Sans', sans-serif !important;
+  font-weight: 600 !important;
+}
+
+.driver-popover-close-btn {
+  color: #666 !important;
+  font-family: 'DM Sans', sans-serif !important;
+}
+
+.driver-popover-close-btn:hover {
+  color: #333 !important;
+}

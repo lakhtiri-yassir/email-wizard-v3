@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Logo } from '../ui/Logo';
 import { useNavigate } from 'react-router-dom';
 
+
 const navigation = [
   { name: 'Dashboard', icon: LayoutDashboard, href: '/app' },
   { name: 'Contacts', icon: Users, href: '/app/contacts' },

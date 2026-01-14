@@ -27,6 +27,7 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminSystemPage } from './pages/admin/AdminSystemPage';
 import { AdminLayout } from './components/admin/AdminLayout';
 import VerifyEmailOTPPage from './pages/VerifyEmailOTPPage';
+import './styles/tour.css';
 
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {

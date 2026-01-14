@@ -45,6 +45,8 @@ import { AppLayout } from '../../components/app/AppLayout';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+import { useTour } from '../../hooks/useTour';
+import { TourReplayButton } from '../../components/TourReplayButton'
 
 interface DashboardStats {
   totalCampaigns: number;
@@ -67,6 +69,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   
+  const { startTour, hasCompletedTour, isLoading } = useTour()
+
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
     totalCampaigns: 0,
@@ -92,6 +96,16 @@ export default function Dashboard() {
       loadTimeSeriesData();
     }
   }, [user, selectedDateRange, customStartDate, customEndDate]);
+
+  useEffect(() => {
+    if (!isLoading && !hasCompletedTour) {
+      const timer = setTimeout(() => {
+        startTour()
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [isLoading, hasCompletedTour, startTour])
+
 
   async function loadDashboardData() {
     if (!user) return;
@@ -326,13 +340,17 @@ export default function Dashboard() {
   return (
     <AppLayout>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header with Greeting */}
+        {/* Header with Greeting AND TOUR BUTTON */}
         <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
-            <Sparkles className="text-gold" size={32} />
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-purple to-gold bg-clip-text text-transparent">
-              Welcome Back!
-            </h1>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-3">
+              <Sparkles className="text-gold" size={32} />
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-purple to-gold bg-clip-text text-transparent">
+                Welcome Back!
+              </h1>
+            </div>
+            {/* TOUR REPLAY BUTTON - TOP RIGHT */}
+            <TourReplayButton />
           </div>
           <p className="text-gray-600 text-lg">Here's what's happening with your campaigns today</p>
         </div>
